@@ -30,7 +30,7 @@ proc is_instrument_0_reg {reg} {
 	variable current_register
 
 	if {($reg >= 0 && $reg <= 7)} {
-		message "instrument 0 register detected: $reg"
+		#message "instrument 0 register detected: $reg"
 		set waiting_data true
 		set current_register $reg
 	} else {
@@ -44,7 +44,7 @@ proc is_instrument_0_data {value} {
 	variable current_register
 
 	if {$waiting_data} {
-		message "instrument 0 data detected: $value"
+		#message "instrument 0 data detected: $value"
 		puts $file_handle "register: [format "%02x" $current_register ], value: [format "%02x" $value]"
 		flush $file_handle
 		set waiting_data false
