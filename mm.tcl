@@ -30,7 +30,6 @@ proc is_instrument_0_reg {reg} {
 	variable current_register
 
 	if {($reg >= 0 && $reg <= 7)} {
-		#message "instrument 0 register detected: $reg"
 		set waiting_data true
 		set current_register $reg
 	} else {
@@ -43,12 +42,76 @@ proc is_instrument_0_data {value} {
 	variable file_handle
 	variable current_register
 
-	if {$waiting_data} {
-		#message "instrument 0 data detected: $value"
-		puts $file_handle "register: [format "%02x" $current_register ], value: [format "%02x" $value]"
-		flush $file_handle
-		set waiting_data false
+	if {!$waiting_data} {
+		return
 	}
+
+	switch $current_register {
+		0 {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts -nonewline $file_handle       "value: [format %02x $value], "
+			puts -nonewline $file_handle       "AM(m): [format   %d [expr ($value & 128) > 0]], "
+			puts -nonewline $file_handle      "VIB(m): [format   %d [expr ($value &  64) > 0]], "
+			puts -nonewline $file_handle      "EGT(m): [format   %d [expr ($value &  32) > 0]], "
+			puts -nonewline $file_handle      "KSR(m): [format   %d [expr ($value &  16) > 0]], "
+			puts            $file_handle "Multiple(m): [format   %d [expr ($value &  15)]]"
+
+		}
+		1 {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts -nonewline $file_handle       "value: [format %02x $value], "
+			puts -nonewline $file_handle       "AM(c): [format   %d [expr ($value & 128) > 0]], "
+			puts -nonewline $file_handle      "VIB(c): [format   %d [expr ($value &  64) > 0]], "
+			puts -nonewline $file_handle      "EGT(c): [format   %d [expr ($value &  32) > 0]], "
+			puts -nonewline $file_handle      "KSR(c): [format   %d [expr ($value &  16) > 0]], "
+			puts            $file_handle "Multiple(c): [format   %d [expr ($value &  15)]]"
+
+		}
+		2 {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts -nonewline $file_handle       "value: [format %02x $value], "
+			puts -nonewline $file_handle      "KSL(m): [format   %d [expr ($value & 192) >> 6]], "
+			puts            $file_handle      "mod(c): [format   %d [expr ($value &  63)]]"
+		}
+		3 {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts -nonewline $file_handle       "value: [format %02x $value], "
+			puts -nonewline $file_handle      "KSL(c): [format   %d [expr ($value & 192) >> 6]], "
+			puts -nonewline $file_handle          "DC: [format   %d [expr ($value &  16) > 0]], "
+			puts -nonewline $file_handle          "DM: [format   %d [expr ($value &   8) > 0]], "
+			puts            $file_handle    "feedback: [format   %d [expr ($value &   7)]]"
+		}
+		4 {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts -nonewline $file_handle       "value: [format %02x $value], "
+			puts -nonewline $file_handle   "attack(m): [format   %d [expr $value / 16]], "
+			puts            $file_handle    "decay(m): [format   %d [expr $value & 15]]"
+		}
+		5 {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts -nonewline $file_handle       "value: [format %02x $value], "
+			puts -nonewline $file_handle   "attack(c): [format   %d [expr $value / 16]], "
+			puts            $file_handle    "decay(c): [format   %d [expr $value & 15]]"
+		}
+		6 {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts -nonewline $file_handle       "value: [format %02x $value], "
+			puts -nonewline $file_handle  "sustain(m): [format   %d [expr $value / 16]], "
+			puts            $file_handle  "release(m): [format   %d [expr $value & 15]]"
+		}
+		7 {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts -nonewline $file_handle       "value: [format %02x $value], "
+			puts -nonewline $file_handle  "sustain(c): [format   %d [expr $value / 16]], "
+			puts            $file_handle  "release(c): [format   %d [expr $value & 15]]"
+		}
+		default {
+			puts -nonewline $file_handle    "register: [format %02x $current_register], "
+			puts            $file_handle       "value: [format %02x $value]"
+		}
+	}
+	flush $file_handle
+	set waiting_data false
 }
 
 proc toggle_access {} {
