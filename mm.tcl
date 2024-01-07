@@ -48,66 +48,66 @@ proc is_instrument_0_data {value} {
 
 	switch $current_register {
 		0 {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts -nonewline $file_handle       "value: [format %02x $value], "
-			puts -nonewline $file_handle       "AM(m): [format   %d [expr ($value & 128) > 0]], "
-			puts -nonewline $file_handle      "VIB(m): [format   %d [expr ($value &  64) > 0]], "
-			puts -nonewline $file_handle      "EGT(m): [format   %d [expr ($value &  32) > 0]], "
-			puts -nonewline $file_handle      "KSR(m): [format   %d [expr ($value &  16) > 0]], "
-			puts            $file_handle "Multiple(m): [format   %d [expr ($value &  15)]]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle        "value: [format %02x $value]"
+			puts            $file_handle "     AM(OP1): [format   %d [expr ($value & 128) > 0]]"
+			puts            $file_handle "    VIB(OP1): [format   %d [expr ($value &  64) > 0]]"
+			puts            $file_handle "    EGT(OP1): [format   %d [expr ($value &  32) > 0]]"
+			puts            $file_handle "    KSR(OP1): [format   %d [expr ($value &  16) > 0]]"
+			puts            $file_handle "   MULT(OP1): [format   %d [expr ($value &  15)]]"
 
 		}
 		1 {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts -nonewline $file_handle       "value: [format %02x $value], "
-			puts -nonewline $file_handle       "AM(c): [format   %d [expr ($value & 128) > 0]], "
-			puts -nonewline $file_handle      "VIB(c): [format   %d [expr ($value &  64) > 0]], "
-			puts -nonewline $file_handle      "EGT(c): [format   %d [expr ($value &  32) > 0]], "
-			puts -nonewline $file_handle      "KSR(c): [format   %d [expr ($value &  16) > 0]], "
-			puts            $file_handle "Multiple(c): [format   %d [expr ($value &  15)]]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle        "value: [format %02x $value]"
+			puts            $file_handle "     AM(OP2): [format   %d [expr ($value & 128) > 0]]"
+			puts            $file_handle "    VIB(OP2): [format   %d [expr ($value &  64) > 0]]"
+			puts            $file_handle "    EGT(OP2): [format   %d [expr ($value &  32) > 0]]"
+			puts            $file_handle "    KSR(OP2): [format   %d [expr ($value &  16) > 0]]"
+			puts            $file_handle "   MULT(OP2): [format   %d [expr ($value &  15)]]"
 
 		}
 		2 {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts -nonewline $file_handle       "value: [format %02x $value], "
-			puts -nonewline $file_handle      "KSL(m): [format   %d [expr ($value & 192) >> 6]], "
-			puts            $file_handle      "mod(c): [format   %d [expr ($value &  63)]]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle        "value: [format %02x $value]"
+			puts            $file_handle "    KSL(OP1): [format   %d [expr ($value & 192) >> 6]]"
+			puts            $file_handle "     TL(OP1): [format   %d [expr ($value &  63)]]"
 		}
 		3 {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts -nonewline $file_handle       "value: [format %02x $value], "
-			puts -nonewline $file_handle      "KSL(c): [format   %d [expr ($value & 192) >> 6]], "
-			puts -nonewline $file_handle          "DC: [format   %d [expr ($value &  16) > 0]], "
-			puts -nonewline $file_handle          "DM: [format   %d [expr ($value &   8) > 0]], "
-			puts            $file_handle    "feedback: [format   %d [expr ($value &   7)]]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle        "value: [format %02x $value]"
+			puts            $file_handle "    KSL(OP2): [format   %d [expr ($value & 192) >> 6]]"
+			puts            $file_handle "    WF(OP2) : [format   %d [expr ($value &  16) > 0]]"
+			puts            $file_handle "    WF(OP1) : [format   %d [expr ($value &   8) > 0]]"
+			puts            $file_handle "    feedback: [format   %d [expr ($value &   7)]]"
 		}
 		4 {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts -nonewline $file_handle       "value: [format %02x $value], "
-			puts -nonewline $file_handle   "attack(m): [format   %d [expr $value / 16]], "
-			puts            $file_handle    "decay(m): [format   %d [expr $value & 15]]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle        "value: [format %02x $value]"
+			puts            $file_handle " attack(OP1): [format   %d [expr $value / 16]]"
+			puts            $file_handle "  decay(OP1): [format   %d [expr $value & 15]]"
 		}
 		5 {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts -nonewline $file_handle       "value: [format %02x $value], "
-			puts -nonewline $file_handle   "attack(c): [format   %d [expr $value / 16]], "
-			puts            $file_handle    "decay(c): [format   %d [expr $value & 15]]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle        "value: [format %02x $value]"
+			puts            $file_handle " attack(OP2): [format   %d [expr $value / 16]]"
+			puts            $file_handle "  decay(OP2): [format   %d [expr $value & 15]]"
 		}
 		6 {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts -nonewline $file_handle       "value: [format %02x $value], "
-			puts -nonewline $file_handle  "sustain(m): [format   %d [expr $value / 16]], "
-			puts            $file_handle  "release(m): [format   %d [expr $value & 15]]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle        "value: [format %02x $value]"
+			puts            $file_handle "sustain(OP1): [format   %d [expr $value / 16]]"
+			puts            $file_handle "release(OP1): [format   %d [expr $value & 15]]"
 		}
 		7 {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts -nonewline $file_handle       "value: [format %02x $value], "
-			puts -nonewline $file_handle  "sustain(c): [format   %d [expr $value / 16]], "
-			puts            $file_handle  "release(c): [format   %d [expr $value & 15]]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle        "value: [format %02x $value]"
+			puts            $file_handle "sustain(OP2): [format   %d [expr $value / 16]]"
+			puts            $file_handle "release(OP2): [format   %d [expr $value & 15]]"
 		}
 		default {
-			puts -nonewline $file_handle    "register: [format %02x $current_register], "
-			puts            $file_handle       "value: [format %02x $value]"
+			puts -nonewline $file_handle "    register: [format %02x $current_register], "
+			puts            $file_handle "       value: [format %02x $value]"
 		}
 	}
 	flush $file_handle
