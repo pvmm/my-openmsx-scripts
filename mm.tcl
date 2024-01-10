@@ -46,68 +46,51 @@ proc is_instrument_0_data {value} {
 		return
 	}
 
+	puts -nonewline $file_handle "register: [format %02x $current_register], "
+	puts            $file_handle    "value: [format %02x $value]"
+
 	switch $current_register {
 		0 {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle        "value: [format %02x $value]"
-			puts            $file_handle "     AM(OP1): [format   %d [expr ($value & 128) > 0]]"
-			puts            $file_handle "    VIB(OP1): [format   %d [expr ($value &  64) > 0]]"
-			puts            $file_handle "    EGT(OP1): [format   %d [expr ($value &  32) > 0]]"
-			puts            $file_handle "    KSR(OP1): [format   %d [expr ($value &  16) > 0]]"
-			puts            $file_handle "   MULT(OP1): [format   %d [expr ($value &  15)]]"
-
+			puts $file_handle "  Amplitude Modulation (M): [format   %s [expr ($value & 128) > 0 ? ON : OFF]]"
+			puts $file_handle "               Vibrato (M): [format   %s [expr ($value &  64) > 0 ? ON : OFF]]"
+			puts $file_handle "         Envelope Type (M): [format   %s [expr ($value &  32) > 0 ? \"Sustained\" : \"Percussive\"]]"
+			puts $file_handle "        Key Scale Rate (M): [format   %s [expr ($value &  16) > 0 ? ON : OFF]]"
+			puts $file_handle "            Multiplier (M): [format   %d [expr ($value &  15)]]"
 		}
 		1 {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle        "value: [format %02x $value]"
-			puts            $file_handle "     AM(OP2): [format   %d [expr ($value & 128) > 0]]"
-			puts            $file_handle "    VIB(OP2): [format   %d [expr ($value &  64) > 0]]"
-			puts            $file_handle "    EGT(OP2): [format   %d [expr ($value &  32) > 0]]"
-			puts            $file_handle "    KSR(OP2): [format   %d [expr ($value &  16) > 0]]"
-			puts            $file_handle "   MULT(OP2): [format   %d [expr ($value &  15)]]"
-
+			puts $file_handle "  Amplitude Modulation (C): [format   %s [expr ($value & 128) > 0 ? ON : OFF]]"
+			puts $file_handle "               Vibrato (C): [format   %s [expr ($value &  64) > 0 ? ON : OFF]]"
+			puts $file_handle "         Envelope Type (C): [format   %s [expr ($value &  32) > 0 ? \"Sustained\" : \"Percussive\"]]"
+			puts $file_handle "        Key Scale Rate (C): [format   %s [expr ($value &  16) > 0 ? ON : OFF]]"
+			puts $file_handle "            Multiplier (C): [format   %d [expr ($value &  15)]]"
 		}
 		2 {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle        "value: [format %02x $value]"
-			puts            $file_handle "    KSL(OP1): [format   %d [expr ($value & 192) >> 6]]"
-			puts            $file_handle "     TL(OP1): [format   %d [expr ($value &  63)]]"
+			puts $file_handle "       Key Scale Level (M): [format   %d [expr ($value & 192) >> 6]]"
+			puts $file_handle "           Total Level (M): [format   %d [expr ($value &  63)]]"
 		}
 		3 {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle        "value: [format %02x $value]"
-			puts            $file_handle "    KSL(OP2): [format   %d [expr ($value & 192) >> 6]]"
-			puts            $file_handle "    WF(OP2) : [format   %d [expr ($value &  16) > 0]]"
-			puts            $file_handle "    WF(OP1) : [format   %d [expr ($value &   8) > 0]]"
-			puts            $file_handle "    feedback: [format   %d [expr ($value &   7)]]"
+			puts $file_handle "       Key Scale Level (C): [format   %d [expr ($value & 192) >> 6]]"
+			puts $file_handle "              Waveform (C): [format   %s [expr ($value &  16) > 0 ? \"Half Sine\" : \"Sine\"]]"
+			puts $file_handle "              Waveform (M): [format   %s [expr ($value &   8) > 0 ? \"Half Sine\" : \"Sine\"]]"
+			puts $file_handle "              Feedback (M): [format   %d [expr ($value &   7)]]"
 		}
 		4 {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle        "value: [format %02x $value]"
-			puts            $file_handle " attack(OP1): [format   %d [expr $value / 16]]"
-			puts            $file_handle "  decay(OP1): [format   %d [expr $value & 15]]"
+			puts $file_handle "           Attack Rate (M): [format   %d [expr ($value & 240) >> 4]]"
+			puts $file_handle "            Decay Rate (M): [format   %d [expr ($value & 15)]]"
 		}
 		5 {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle        "value: [format %02x $value]"
-			puts            $file_handle " attack(OP2): [format   %d [expr $value / 16]]"
-			puts            $file_handle "  decay(OP2): [format   %d [expr $value & 15]]"
+			puts $file_handle "           Attack Rate (C): [format   %d [expr ($value & 240) >> 4]]"
+			puts $file_handle "            Decay Rate (C): [format   %d [expr ($value & 15)]]"
 		}
 		6 {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle        "value: [format %02x $value]"
-			puts            $file_handle "sustain(OP1): [format   %d [expr $value / 16]]"
-			puts            $file_handle "release(OP1): [format   %d [expr $value & 15]]"
+			puts $file_handle "         Sustain Level (M): [format   %d [expr ($value & 240) >> 4]]"
+			puts $file_handle "          Release Rate (C): [format   %d [expr ($value & 15)]]"
 		}
 		7 {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle        "value: [format %02x $value]"
-			puts            $file_handle "sustain(OP2): [format   %d [expr $value / 16]]"
-			puts            $file_handle "release(OP2): [format   %d [expr $value & 15]]"
+			puts $file_handle "         Sustain Level (M): [format   %d [expr ($value & 240) >> 4]]"
+			puts $file_handle "          Release Rate (C): [format   %d [expr ($value & 15)]]"
 		}
 		default {
-			puts -nonewline $file_handle "    register: [format %02x $current_register], "
-			puts            $file_handle "       value: [format %02x $value]"
 		}
 	}
 	flush $file_handle
