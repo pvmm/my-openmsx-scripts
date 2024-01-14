@@ -718,7 +718,7 @@ proc vgm_rec_end {abort} {
 		# YMF262 clock
 		variable opl3_logged
 		if {$opl3_logged} {
-			append header [little_endian_32 14318180]
+			append header [little_endian_32 14318182]
 		} else {
 			append header [zeros 4]
 		}
