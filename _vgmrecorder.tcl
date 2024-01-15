@@ -7,8 +7,8 @@ variable y8950_register
 variable opl4_register_wave
 variable opl4_register
 variable active_fm_register -1
-variable opl3_register_1
-variable opl3_register_2
+variable opl3_register
+variable opl3_port
 
 variable start_time 0
 variable tick_time 0
@@ -271,8 +271,7 @@ proc vgm_rec_start {} {
 	variable y8950_register     -1
 	variable opl4_register_wave -1
 	variable opl4_register      -1
-	variable opl3_register_1    -1
-	variable opl3_register_2    -1
+	variable opl3_register      -1
 
 	variable ticks 0
 	variable music_data ""
@@ -365,9 +364,13 @@ proc vgm_rec_start {} {
 	variable opl3_logged
 	if {$opl3_logged} {
 		lappend watchpoints [debug set_watchpoint write_io 0xC0 {} {vgm::write_opl3_address_1}] \
-		                    [debug set_watchpoint write_io 0xC1 {} {vgm::write_opl3_data_1}] \
+		                    [debug set_watchpoint write_io 0xC1 {} {vgm::write_opl3_data}] \
 		                    [debug set_watchpoint write_io 0xC2 {} {vgm::write_opl3_address_2}] \
-		                    [debug set_watchpoint write_io 0xC3 {} {vgm::write_opl3_data_2}]
+		                    [debug set_watchpoint write_io 0xC3 {} {vgm::write_opl3_data}] \
+		                    [debug set_watchpoint write_io 0xC4 {} {vgm::write_opl3_address_1}] \
+		                    [debug set_watchpoint write_io 0xC5 {} {vgm::write_opl3_data}] \
+		                    [debug set_watchpoint write_io 0xC6 {} {vgm::write_opl3_address_2}] \
+		                    [debug set_watchpoint write_io 0xC7 {} {vgm::write_opl3_data}]
 		append recording_text " OPL3"
 	}
 
@@ -520,28 +523,25 @@ proc write_opl4_data {} {
 }
 
 proc write_opl3_address_1 {} {
-	variable opl3_register_1 $::wp_last_value
+	variable opl3_register $::wp_last_value
+	variable opl3_port 0xC0
 }
 
 proc write_opl3_address_2 {} {
-	variable opl3_register_2 $::wp_last_value
+	variable opl3_register $::wp_last_value
+	variable opl3_port 0xC2
 }
 
-proc write_opl3_data_1 {} {
-	variable opl3_register_1
-	if {$opl3_register_1 >= 0} {
+proc write_opl3_data {} {
+	variable opl3_register
+	if {$opl3_register >= 0} {
 		update_time
+		variable opl3_port
 		variable music_data
-		append music_data [binary format ccc 0x5E $opl3_register_1 $::wp_last_value]
-	}
-}
-
-proc write_opl3_data_2 {} {
-	variable opl3_register_2
-	if {$opl3_register_2 >= 0} {
-		update_time
-		variable music_data
-		append music_data [binary format ccc 0x5F $opl3_register_2 $::wp_last_value]
+		switch $opl3_port {
+			0xC0 { append music_data [binary format ccc 0x5E $opl3_register $::wp_last_value] }
+			0xC2 { append music_data [binary format ccc 0x5F $opl3_register $::wp_last_value] }
+		}
 	}
 }
 
