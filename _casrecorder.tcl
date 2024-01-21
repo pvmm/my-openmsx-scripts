@@ -134,6 +134,10 @@ proc cas_rec_start {} {
 }
 
 proc cas_rec_add {file_name} {
+	variable active
+	if {!$active} {
+		error "Tape file not created."
+	}
 	if {![file exists $file_name]} {
 		error "File $file_name not found."
 	}
@@ -143,18 +147,21 @@ proc cas_rec_add {file_name} {
 	}
 	# Get file prefix
 	set fp [open $file_name r]
-	set prefix [read $fp 1]
+	set prefix [scan [read $fp 1] %c]
 
-	switch -- $prefix {
-		# BASIC
-		0xff {
+	variable HEADER
+	variable tape_data
+	switch $prefix {
+		255 {
+			message "Adding BASIC file..."
 			variable BASIC
+			append tape_data $HEADER
 			append tape_data $BASIC
-			append tape_data [string toupper [string range $file_name 0 5]]
+			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
 			append tape_data [read $fp [expr {$fsize - 1}]]
 		}
-		# BIN
-		0xfe {
+		254 {
+			message "Adding binary file..."
 			variable BINARY
 			if {$fsize < $BIN_PREFIX_SIZE} {
 				error "File $file_name ends abruptly."
@@ -162,22 +169,23 @@ proc cas_rec_add {file_name} {
 			set start_addr [read $fp 2]
 			set end_addr   [read $fp 2]
 			set exec_addr  [read $fp 2]
+			append tape_data $HEADER
 			append tape_data $BINARY
-			append tape_data [string toupper [string range $file_name 0 5]]
+			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
 			append tape_data [read $fp [expr {$fsize - 7}]]
 		}
-		# ASCII
 		default {
+			message "Adding ASCII file..."
 			variable ASCII
+			append tape_data $HEADER
 			append tape_data $ASCII
-			append tape_data [string toupper [string range $file_name 0 5]]
+			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
 			append tape_data [read $fp $fsize]
 			append tape_data [binary format c 0x1A]
 		}
 	}
 
 	close $fp
-	message "File $file_name added to tape file."
 }
 
 proc cas_rec_end {abort} {
@@ -189,16 +197,15 @@ proc cas_rec_end {abort} {
 	variable tape_data
 	if {!$abort} {
 		variable full_file_name
-		variable file_handler
 		set file_handler [open $full_file_name "w"]
 		fconfigure $file_handler -encoding binary -translation binary
 		puts -nonewline $file_handler $tape_data
 		close $file_handler
 
 		variable file_name
-		set stop_message "Tape recording stopped, wrote data to $file_name."
+		set stop_message "Tape recording stopped, wrote data to [file tail $full_file_name]."
 	} else {
-		set stop_message "Tape recording aborted, no data written..."
+		set stop_message "Tape recording aborted, no data written."
 		set tape_data ""
 	}
 
