@@ -162,6 +162,10 @@ proc cas_rec_add {file_name} {
 			append tape_data $HEADER
 			# file contents
 			append tape_data [read $fp [expr {$fsize - 1}]]
+			# 16 byte boundary padding with zero
+			set len [expr (8 - [string length $tape_data] % 8) % 8]
+			append tape_data [string repeat [binary format c 0] $len]
+			append tape_data [string repeat [binary format c 0] 8]
 		}
 		254 {
 			message "Adding binary file..."
@@ -182,6 +186,9 @@ proc cas_rec_add {file_name} {
 			append tape_data [read $fp 2]
 			# file contents
 			append tape_data [read $fp [expr {$fsize - 7}]]
+			# 8 byte boundary padding with zero
+			set len [expr (8 - [string length $tape_data] % 8) % 8]
+			append tape_data [string repeat [binary format c 0] $len]
 		}
 		default {
 			message "Adding ASCII file..."
@@ -192,15 +199,13 @@ proc cas_rec_add {file_name} {
 			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
 			append tape_data $HEADER
 			# file contents
-			append tape_data [read $fp $fsize]
+			append tape_data "[binary format c ${prefix}][read $fp $fsize]"
 			# EOF
-			append tape_data [binary format c 0x1A]
+			# 256 byte boundary padding with 0x1A
+			set len [expr 256 - [string length $tape_data] % 256]
+			append tape_data [string repeat [binary format c 0x1A] $len]
 		}
 	}
-	# 16 byte boundary padding with zero
-	set len [expr (8 - [string length $tape_data] % 8) % 8]
-	append tape_data [string repeat [binary format c 0] $len]
-	append tape_data [string repeat [binary format c 0] 8]
 
 	close $fp
 }
