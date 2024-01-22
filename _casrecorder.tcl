@@ -20,7 +20,7 @@ proc cas_rec_help {args} {
         switch -- [lindex $args 1] {
                 "start"    {return {CAS recording will be initialised. By default the file name will be tape0001.cas, but when it already exists, tape0002.cas etc...
 
-Syntax: cas_rec new [CAS file name]
+Syntax: cas_rec start [CAS file name]
 
 Create a memory region to store files in a tape. A file name can be specified if desired.
 }}
@@ -113,10 +113,10 @@ proc cas_rec {args} {
 		if {$active} {
 			error "Tape file already defined, please stop it before running start again."
 		}
-		if {$start_index == ([llength $args])} {
-			cas_rec_set_file_name [lindex $args $start_index+1]
-		} else {
+		if {$start_index == [llength $args] - 1} {
 			cas_rec_set_file_name
+		} else {
+			cas_rec_set_file_name [lindex $args $start_index+1]
 		}
 		return [cas::cas_rec_start]
 	}
@@ -145,13 +145,13 @@ proc cas_rec_add {file_name} {
 	if {$fsize == 0} {
 		error "File $file_name is empty."
 	}
-	# Get file prefix
+	# Get file header
 	set fp [open $file_name r]
-	set prefix [scan [read $fp 1] %c]
+	set header [scan [read $fp 1] %c]
 
 	variable HEADER
 	variable tape_data
-	switch $prefix {
+	switch $header {
 		255 {
 			message "Adding BASIC file..."
 			append tape_data $HEADER
@@ -200,7 +200,7 @@ proc cas_rec_add {file_name} {
 			append tape_data [string range "[file rootname $file_name]     " 0 5]
 			append tape_data $HEADER
 			# file contents
-			append tape_data "[binary format c ${prefix}][read $fp $fsize]"
+			append tape_data "[binary format c ${header}][read $fp $fsize]"
 			# EOF
 			# 256 byte boundary padding with 0x1A
 			set len [expr 256 - [string length $tape_data] % 256]
