@@ -154,36 +154,53 @@ proc cas_rec_add {file_name} {
 	switch $prefix {
 		255 {
 			message "Adding BASIC file..."
-			variable BASIC
 			append tape_data $HEADER
+			variable BASIC
 			append tape_data $BASIC
+			# cassette file ID
 			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
+			append tape_data $HEADER
+			# file contents
 			append tape_data [read $fp [expr {$fsize - 1}]]
 		}
 		254 {
 			message "Adding binary file..."
-			variable BINARY
 			if {$fsize < $BIN_PREFIX_SIZE} {
 				error "File $file_name ends abruptly."
 			}
-			set start_addr [read $fp 2]
-			set end_addr   [read $fp 2]
-			set exec_addr  [read $fp 2]
 			append tape_data $HEADER
+			variable BINARY
 			append tape_data $BINARY
+			# cassette file ID
 			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
+			append tape_data $HEADER
+			# start address
+			append tape_data [read $fp 2]
+			# end address
+			append tape_data [read $fp 2]
+			# exec address
+			append tape_data [read $fp 2]
+			# file contents
 			append tape_data [read $fp [expr {$fsize - 7}]]
 		}
 		default {
 			message "Adding ASCII file..."
-			variable ASCII
 			append tape_data $HEADER
+			variable ASCII
 			append tape_data $ASCII
+			# cassette file ID
 			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
+			append tape_data $HEADER
+			# file contents
 			append tape_data [read $fp $fsize]
+			# EOF
 			append tape_data [binary format c 0x1A]
 		}
 	}
+	# 16 byte boundary padding with zero
+	set len [expr (8 - [string length $tape_data] % 8) % 8]
+	append tape_data [string repeat [binary format c 0] $len]
+	append tape_data [string repeat [binary format c 0] 8]
 
 	close $fp
 }
