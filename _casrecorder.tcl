@@ -169,6 +169,7 @@ proc cas_rec_add {file_name} {
 		}
 		254 {
 			message "Adding binary file..."
+			variable BIN_PREFIX_SIZE
 			if {$fsize < $BIN_PREFIX_SIZE} {
 				error "File $file_name ends abruptly."
 			}
