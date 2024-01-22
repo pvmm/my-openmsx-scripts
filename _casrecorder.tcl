@@ -158,7 +158,7 @@ proc cas_rec_add {file_name} {
 			variable BASIC
 			append tape_data $BASIC
 			# cassette file ID
-			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
+			append tape_data [string range "[file rootname $file_name]     " 0 5]
 			append tape_data $HEADER
 			# file contents
 			append tape_data [read $fp [expr {$fsize - 1}]]
@@ -177,7 +177,7 @@ proc cas_rec_add {file_name} {
 			variable BINARY
 			append tape_data $BINARY
 			# cassette file ID
-			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
+			append tape_data [string range "[file rootname $file_name]     " 0 5]
 			append tape_data $HEADER
 			# start address
 			append tape_data [read $fp 2]
@@ -197,7 +197,7 @@ proc cas_rec_add {file_name} {
 			variable ASCII
 			append tape_data $ASCII
 			# cassette file ID
-			append tape_data [string toupper [string range "[file rootname $file_name]     " 0 5]]
+			append tape_data [string range "[file rootname $file_name]     " 0 5]
 			append tape_data $HEADER
 			# file contents
 			append tape_data "[binary format c ${prefix}][read $fp $fsize]"
