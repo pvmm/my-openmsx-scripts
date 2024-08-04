@@ -99,9 +99,9 @@ proc markdata {addr} {
 
 	if {$type eq [NAUGHT]} {
 		set m($addr) [DATA]
-		log "marking [format %x $addr] as DATA"
+		log "marking [format %04x $addr] as DATA"
 	} elseif {$m($addr) eq [CODE]} {
-		log "warning: overwritting address type in [format %x $addr] from CODE to EDITABLE_CODE"
+		log "warning: overwritting address type in [format %04x $addr] from CODE to EDITABLE_CODE"
 		set m($addr) [EDITABLE_CODE]
 	}
 }
@@ -112,9 +112,9 @@ proc markcode {addr} {
 
 	if {$type eq [NAUGHT]} {
 		set m($addr) [CODE]
-		log "marking [format %x $addr] as CODE"
+		log "marking [format %04x $addr] as CODE"
 	} elseif {$m($addr) eq [DATA]} {
-		log "warning: overwritting address type in [format %x $addr] from DATA to EDITABLE_CODE"
+		log "warning: overwritting address type in [format %04x $addr] from DATA to EDITABLE_CODE"
 		set m($addr) [EDITABLE_CODE]
 	}
 }
