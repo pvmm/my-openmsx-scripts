@@ -1,8 +1,6 @@
 namespace eval codeanalyzer {
 
 ;# TODO:
-;# * expose OpenMSX dasm to tcl scripts;
-;# * detect "AB" in ROM;
 ;# * try to detect functions;
 ;# * try to detect all types of RAM-to-VRAM memory copying:
 ;#   ** pattern generator table (PGT)
@@ -10,20 +8,27 @@ namespace eval codeanalyzer {
 ;#   ** colour table;
 ;#   ** sprite generator table;
 ;#   ** sprite attribute table;
+;# * try to detect keyboard input;
+;# * try to detect joystick port input;
 ;# * try to detect sound generation (PSG);
 
 variable m ;# memory
 variable pc
 variable slot
 variable segment
+variable ss ""
 variable cond {}
-variable entry_point
+variable entry_point {}
+# info
+variable datarecs 0 ;# data records
+variable coderecs 0 ;# code records
+variable bothrecs 0 ;# both records
 
 ;# constants
-proc NAUGHT		{} { return {}}
-proc CODE		{} { return 1 }
-proc DATA		{} { return 2 }
-proc EDITABLE_CODE	{} { return 3 }
+proc NAUGHT	{} { return {}}
+proc CODE	{} { return 1 }
+proc DATA	{} { return 2 }
+proc BOTH	{} { return 3 }
 
 set_help_proc codeanalyzer [namespace code codeanalyzer_help]
 proc codeanalyzer_help {args} {
@@ -86,6 +91,7 @@ proc _codeanalyzer {args} {
 
 proc codeanalyzer_start {args} {
 	variable pc {}
+	variable entry_point
 	variable cond
 
 	if {$args eq {} || [llength $args] > 2} {
@@ -106,8 +112,14 @@ proc codeanalyzer_start {args} {
 	if {$cond eq ""} {
 		puts "Codeanalyzer started."
 		if {$subslot ne ""} {
+			if {$entry_point eq ""} {
+				codeanalyzer_scancart
+			}
 			set cond [debug set_condition "\[pc_in_slot $slot $subslot\]" codeanalyzer::_checkmem]
 		} else {
+			if {$entry_point eq ""} {
+				codeanalyzer_scancart
+			}
 			set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_checkmem]
 		}
 	} else {
@@ -123,6 +135,7 @@ proc codeanalyzer_stop {} {
 	if {$cond ne ""} {
 		puts "Codeanalyzer stopped."
 		debug remove_condition $cond
+		set cond ""
 	} else {
 		puts "Nothing to stop."
 	}
@@ -156,7 +169,33 @@ proc codeanalyzer_scancart {} {
 }
 
 proc codeanalyzer_info {} {
-	error "not implemented yet."
+	variable ss
+	if {$ss eq ""} {
+		error "codeanalyzer was never executed."
+	}
+
+	variable entry_point
+	variable datarecs
+	variable coderecs
+	variable bothrecs
+	variable cond
+
+	puts "running on slot $ss"
+	if {$entry_point eq ""} {
+		puts "entry point is undefined"
+	} else {
+		puts "entry point is [format %04x $entry_point]"
+	}
+	puts "number of DATA records: $datarecs"
+	puts "number of CODE records: $coderecs"
+	puts "number of BOTH records: $bothrecs"
+
+	puts -nonewline "code analyzer is "
+	if {$cond ne ""} {
+		puts "still running"
+	} else {
+		puts "stopped"
+	}
 }
 
 proc log {s} {
@@ -168,27 +207,39 @@ proc log {s} {
 
 proc markdata {addr} {
 	variable m
+	variable datarecs
+	variable coderecs
+	variable bothrecs
 	set type [array get m $addr]
 
 	if {$type eq [NAUGHT]} {
 		set m($addr) [DATA]
 		log "marking [format %04x $addr] as DATA"
+		incr datarecs
 	} elseif {$m($addr) eq [CODE]} {
-		log "warning: overwritting address type in [format %04x $addr] from CODE to EDITABLE_CODE"
-		set m($addr) [EDITABLE_CODE]
+		log "warning: overwritting address type in [format %04x $addr] from CODE to BOTH"
+		set m($addr) [BOTH]
+		incr coderecs -1
+		incr bothrecs
 	}
 }
 
 proc markcode {addr} {
 	variable m
+	variable datarecs
+	variable coderecs
+	variable bothrecs
 	set type [array get m $addr]
 
 	if {$type eq [NAUGHT]} {
 		set m($addr) [CODE]
 		log "marking [format %04x $addr] as CODE"
+		incr coderecs
 	} elseif {$m($addr) eq [DATA]} {
-		log "warning: overwritting address type in [format %04x $addr] from DATA to EDITABLE_CODE"
-		set m($addr) [EDITABLE_CODE]
+		log "warning: overwritting address type in [format %04x $addr] from DATA to BOTH"
+		set m($addr) [BOTH]
+		incr datarecs -1
+		incr bothrecs
 	}
 }
 
@@ -318,7 +369,64 @@ proc _checkmem {} {
 				markdata $hl
 			} elseif {[peek $p1] == 0x1e} { ;# RL (HL)
 				markdata $hl
+			} elseif {[peek $p1] == 0x26} { ;# SLA (HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x2e} { ;# SRA (HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x3e} { ;# SRL (HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x46} { ;# BIT 0,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x4e} { ;# BIT 1,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x56} { ;# BIT 2,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x5e} { ;# BIT 3,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x66} { ;# BIT 4,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x6e} { ;# BIT 5,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x76} { ;# BIT 6,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x7e} { ;# BIT 7,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x86} { ;# RES 0,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x8e} { ;# RES 1,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x96} { ;# RES 2,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0x9e} { ;# RES 3,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xa6} { ;# RES 4,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xae} { ;# RES 5,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xb6} { ;# RES 6,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xbe} { ;# RES 7,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xc6} { ;# BIT 0,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xce} { ;# BIT 1,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xd6} { ;# BIT 2,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xde} { ;# BIT 3,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xe6} { ;# BIT 4,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xee} { ;# BIT 5,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xf6} { ;# BIT 6,(HL)
+				markdata $hl
+			} elseif {[peek $p1] == 0xfe} { ;# BIT 7,(HL)
+				markdata $hl
 			}
+		}
+		e9 { ;# JP (HL)
+			markcode $hl
 		}
 		ed {
 			;# LD XX, (word)
@@ -346,8 +454,9 @@ proc _checkmem {} {
 			}
 		}
 		dd { ;# operation with IX somewhere
-			;# LD X,(IX + index)
-			if {[peek $p1] == 0x7e} { ;# X=A
+			if {[peek $p1] == 0xe9} { ;# JP (IX)
+				markcode $ix
+			} elseif {[peek $p1] == 0x7e} { ;# LD X=A, (IX + index)
 				set index [peek $p2]
 				markdata [expr $ix + $index]
 			} elseif {[peek $p1] == 0x46} { ;# X=B
@@ -377,8 +486,9 @@ proc _checkmem {} {
 			}
 		}
 		fd { ;# operation with IY somewhere
-			;# LD X,(IY + index)
-			if {[peek $p1] == 0x7e} { ;# X=A
+			if {[peek $p1] == 0xe9} { ;# JP (IY)
+				markcode $iy
+			} elseif {[peek $p1] == 0x7e} { ;# LD X,(IY + index)
 				set index [peek $p2]
 				markdata [expr $iy + $index]
 			} elseif {[peek $p1] == 0x46} { ;# X=B
