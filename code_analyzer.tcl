@@ -16,7 +16,8 @@ variable m ;# memory
 variable pc
 variable slot
 variable segment
-variable cond {}
+variable cond
+variable entry_point
 
 ;# constants
 proc NAUGHT		{} { return {}}
@@ -28,38 +29,50 @@ set_help_proc codeanalyzer [namespace code codeanalyzer_help]
 proc codeanalyzer_help {args} {
 	if {[llength $args] == 1} {
 		return {The codeanalyzer script creates annotated source code from dynamically analyzing running programs.
-Recognized commands: start, stop, pixel
+Recognized commands: start, stop, scancart, info, pixel
 }
 	}
 	switch -- [lindex $args 1] {
-		"start"	{ return {Start script to analyze code.
+		"start"	{ return {Start script that analyzes code.
 
 Syntax: codeanalyzer start <slot> [<subslot>]
 
 Analyze code from specified slot (0..3) and subslot (0..3).
 }}
 		"stop"  { return {Stop script that analyzes code.
+
+Syntax: codeanalyzer stop
+}}
+		"scancart" { return {Search for cartridge ROM signature in specified slot/subslot.
+
+Syntax: codeanalyzer scancart
+}}
+		"info" { return {Print info about code analysis to console.
+
+Syntax: codeanalyzer info
 }}
 		"pixel" { return {Find piece of code that writes to screen positon (x, y).
 
-Syntax: pixel <x> <y>
+Syntax: codeanalyzer pixel <x> <y>
 }}
-		default { error "Unknown command \"[lindex $args 1]\""
+		default { error "Unknown command \"[lindex $args 1]\"."
 }
 	}
 }
 
 proc codeanalyzer {args} {
-	if {[lindex $args 0] eq "start"} {
-		return [codeanalyzer_start [lrange $args 1 end]]
-	}
-	if {[lindex $args 0] eq "stop"} {
-		return [codeanalyzer_stop]
+	switch -- [lindex $args 0] {
+		start    { return [codeanalyzer_start [lrange $args 1 end]] }
+		stop     { return [codeanalyzer_stop] }
+		scancart { return [codeanalyzer_scancart] }
+		info     { return [codeanalyzer_info] }
+		default  { error "Unknown command \"[lindex $args 0]\"." }
 	}
 }
 
 proc codeanalyzer_start {args} {
 	variable pc {}
+	variable cond
 
 	if {[lindex $args] < 1} {
 		error "wrong # args: should be slot subslot"
@@ -67,18 +80,75 @@ proc codeanalyzer_start {args} {
 
 	variable slot    [lindex $args 0]
 	variable subslot [lindex $args 1]
+	;# check slot subslot configuration
+	if {[machine_info issubslotted $slot]} {
+	       if {$subslot eq ""} {
+		       error "slot $slot is extended but subslot parameter is missing."
+	       }
+	}
+
+	;# Who analyzes the code analyzer?
+	variable f
+	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
+		set f codeanalyzer::_debugmem
+	} else {
+		set f codeanalyzer::_checkmem
+	}
 
 	;# set condition according to slot and subslot
-	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
-		set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_debugmem]
+	if {$cond eq ""} {
+		puts "Codeanalyzer started."
+		if {$subslot ne ""} {
+			set cond [debug set_condition "\[pc_in_slot $slot $subslot\]" $f]
+		} else {
+			set cond [debug set_condition "\[pc_in_slot $slot \]" $f]
+		}
 	} else {
-		set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_checkmem]
+		puts "Nothing to start."
 	}
-	return
+	return ;# no output
 }
 
 proc codeanalyzer_stop {} {
-	debug remove_condition $cond
+	variable cond
+
+	if {$cond ne ""} {
+		puts "Codeanalyzer stopped."
+		debug remove_condition $cond
+	} else {
+		puts "Nothing to stop."
+	}
+}
+
+proc codeanalyzer_scancart {} {
+	variable slot
+	variable subslot
+	variable entry_point
+
+	if {![info exists slot]} {
+		error "no slot defined"
+	}
+
+	variable ss $slot
+	if {[machine_info issubslotted $slot]} {
+		if {![info exists subslot]} {
+			error "no subslot defined"
+		}
+		append ss "-$subslot"
+	}
+
+	for addr [list 0x4000 0x8000 0x0000] { ;# memory search order
+		set prefix [format %c%c [peek $addr] [peek [expr $addr + 1]]]
+		if {prefix eq "AB"} {
+			puts "prefix found at $ss:$addr"
+			set entry_point [peek16 [expr $addr + 1]]
+			puts "entry point found at [format %04x $entry_point]"
+		}
+	}
+}
+
+proc codeanalyzer_info {} {
+	error "not implemented yet."
 }
 
 proc _debugmem {} {
@@ -146,7 +216,7 @@ proc _checkmem {} {
 			markdata $de
 		}
 		32 { ;# LD (word),A
-			set word [expr [peek $p1] + ([peek $p2] << 8)]
+			set word [peek16 $p1]
 			markdata $word
 		}
 		7e { ;# LD A,(HL)
@@ -198,7 +268,7 @@ proc _checkmem {} {
 			markdata $de
 		}
 		2a { ;# LD HL,(word)
-			set word [expr [peek $p1] | ([peek $p2] << 8)]
+			set word [peek16 $p1]
 			markdata $word
 		}
 		34 { ;# INC (HL)
@@ -211,7 +281,7 @@ proc _checkmem {} {
 			markdata $hl
 		}
 		3a { ;# LD A,(word) # 0x3a
-			set word [expr [peek $p1] | ([peek $p2] << 8)]
+			set word [peek16 $p1]
 			markdata $word
 		}
 		86 { ;# ADD A, (HL)
@@ -255,19 +325,19 @@ proc _checkmem {} {
 		ed {
 			;# LD XX, (word)
 			if {[peek $p1] == 0x4b} { ;# XX=BC
-				set word [expr [peek $p2] + ([peek $p3] << 8)]
+				set word [peek16 $p2]
 				markdata $word
 			}
 			elseif {[peek $p1] == 0x5b} { ;# XX=DE
-				set word [expr [peek $p2] + ([peek $p3] << 8)]
+				set word [peek16 $p2]
 				markdata $word
 			}
 			elseif {[peek $p1] == 0x6b} { ;# XX=HL
-				set word [expr [peek $p2] + ([peek $p3] << 8)]
+				set word [peek16 $p2]
 				markdata $word
 			}
 			elseif {[peek $p1] == 0x7b} { ;# XX=SP
-				set word [expr [peek $p2] + ([peek $p3] << 8)]
+				set word [peek16 $p2]
 				markdata $word
 			}
 			;# CP operations with (HL)
@@ -315,7 +385,7 @@ proc _checkmem {} {
 				markdata [expr $ix + $index]
 			}
 			elseif {[peek $p1] == 0x2a} {
-				set word [expr [peek $p2] | ([peek $p3] << 8)]
+				set word [peek16 $p2]
 				markdata $word
 			} else { ;# op (IX+index)
 				set index [peek $p2]
@@ -353,7 +423,7 @@ proc _checkmem {} {
 				markdata [expr $iy + $index]
 			}
 			elseif {[peek $p1] == 0x2a} {
-				set word [expr [peek $p2] | ([peek $p3] << 8)]
+				set word [peek16 $p2]
 				markdata $word
 			} else { ;# op (IX+index)
 				set index [peek $p2]
