@@ -91,6 +91,16 @@ proc _codeanalyzer {args} {
 	}
 }
 
+proc slot {} {
+	variable slot
+	return [lindex $slot 0]
+}
+
+proc subslot {} {
+	variable slot
+	return [lindex $slot 1]
+}
+
 proc codeanalyzer_start {args} {
 	variable pc {}
 	variable entry_point
@@ -101,29 +111,21 @@ proc codeanalyzer_start {args} {
 	}
 
 	;# check slot subslot configuration
-	variable slot    [lindex $args 0]
-	variable subslot [lindex $args 1]
-	if {[machine_info issubslotted $slot]} {
-		if {$subslot eq ""} {
+	variable slot [lrange $args 0 end]
+	if {[machine_info issubslotted [slot]]} {
+		if {[subslot] eq ""} {
 			error "slot $slot is extended but subslot parameter is missing."
 		}
-	} elseif {$subslot ne ""} {
+	} elseif {[subslot] ne ""} {
 		error "slot is not extended but subslot is defined."
 	}
 	;# set condition according to slot and subslot
 	if {$cond eq ""} {
 		puts "Codeanalyzer started."
-		if {$subslot ne ""} {
-			if {$entry_point eq ""} {
-				codeanalyzer_scancart
-			}
-			set cond [debug set_condition "\[pc_in_slot $slot $subslot\]" codeanalyzer::_checkmem]
-		} else {
-			if {$entry_point eq ""} {
-				codeanalyzer_scancart
-			}
-			set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_checkmem]
+		if {$entry_point eq ""} {
+			codeanalyzer_scancart
 		}
+		set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_checkmem]
 	} else {
 		puts "Nothing to start."
 	}
@@ -152,17 +154,20 @@ proc codeanalyzer_scancart {} {
 		error "no slot defined"
 	}
 	variable ss $slot
-	if {[machine_info issubslotted $slot]} {
-		if {![info exists subslot]} {
+	if {[machine_info issubslotted [slot]]} {
+		if {[subslot] eq ""} {
 			error "no subslot defined"
 		}
-		append ss "-$subslot"
+		append ss "-[subslot]"
 	}
 
-	;# TODO: change to right slot before scanning
+	debug set_condition "\[pc_in_slot $slot\]" -once codeanalyzer::_do_scancart
+}
+
+proc _do_scancart {} {
+	variable ss
 	foreach addr [list 0x4000 0x8000 0x0000] { ;# memory search order
 		set prefix [format %c%c [peek $addr] [peek [expr $addr + 1]]]
-		puts "$addr - $prefix"
 		if {$prefix eq "AB"} {
 			puts "prefix found at $ss:$addr"
 			set entry_point [peek16 [expr $addr + 2]]
@@ -196,7 +201,7 @@ proc codeanalyzer_info {} {
 	puts "number of CODE records: $coderecs"
 	puts "number of BOTH records: $bothrecs"
 
-	puts -nonewline "code analyzer is "
+	puts -nonewline "codeanalyzer "
 	if {$cond ne ""} {
 		puts "still running"
 	} else {
