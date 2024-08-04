@@ -16,7 +16,7 @@ variable m ;# memory
 variable pc
 variable slot
 variable segment
-variable cond
+variable cond {}
 variable entry_point
 
 ;# constants
@@ -61,12 +61,26 @@ Syntax: codeanalyzer pixel <x> <y>
 }
 
 proc codeanalyzer {args} {
+	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
+		if {[catch {_codeanalyzer {*}$args} fid]} {
+			debug break 
+			puts stderr $::errorInfo
+			error $::errorInfo
+		}
+	} else {
+		_codeanalyzer {*}$args
+	}
+	return
+}
+
+proc _codeanalyzer {args} {
+	set params "[lrange $args 1 end]"
 	switch -- [lindex $args 0] {
-		start    { return [codeanalyzer_start [lrange $args 1 end]] }
-		stop     { return [codeanalyzer_stop] }
-		scancart { return [codeanalyzer_scancart] }
-		info     { return [codeanalyzer_info] }
-		default  { error "Unknown command \"[lindex $args 0]\"." }
+		"start"    { return [codeanalyzer_start {*}$params] }
+		"stop"     { return [codeanalyzer_stop {*}$params] }
+		"scancart" { return [codeanalyzer_scancart {*}$params] }
+		"info"     { return [codeanalyzer_info {*}$params] }
+		default    { error "Unknown command \"[lindex $args 0]\"." }
 	}
 }
 
@@ -74,38 +88,32 @@ proc codeanalyzer_start {args} {
 	variable pc {}
 	variable cond
 
-	if {[lindex $args] < 1} {
+	if {$args eq {} || [llength $args] > 2} {
 		error "wrong # args: should be slot subslot"
 	}
 
+	;# check slot subslot configuration
 	variable slot    [lindex $args 0]
 	variable subslot [lindex $args 1]
-	;# check slot subslot configuration
 	if {[machine_info issubslotted $slot]} {
-	       if {$subslot eq ""} {
-		       error "slot $slot is extended but subslot parameter is missing."
-	       }
+		if {$subslot eq ""} {
+			error "slot $slot is extended but subslot parameter is missing."
+		}
+	} elseif {$subslot ne ""} {
+		error "slot is not extended but subslot is defined."
 	}
-
-	;# Who analyzes the code analyzer?
-	variable f
-	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
-		set f codeanalyzer::_debugmem
-	} else {
-		set f codeanalyzer::_checkmem
-	}
-
 	;# set condition according to slot and subslot
 	if {$cond eq ""} {
 		puts "Codeanalyzer started."
 		if {$subslot ne ""} {
-			set cond [debug set_condition "\[pc_in_slot $slot $subslot\]" $f]
+			set cond [debug set_condition "\[pc_in_slot $slot $subslot\]" codeanalyzer::_checkmem]
 		} else {
-			set cond [debug set_condition "\[pc_in_slot $slot \]" $f]
+			set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_checkmem]
 		}
 	} else {
 		puts "Nothing to start."
 	}
+
 	return ;# no output
 }
 
@@ -128,7 +136,6 @@ proc codeanalyzer_scancart {} {
 	if {![info exists slot]} {
 		error "no slot defined"
 	}
-
 	variable ss $slot
 	if {[machine_info issubslotted $slot]} {
 		if {![info exists subslot]} {
@@ -137,31 +144,25 @@ proc codeanalyzer_scancart {} {
 		append ss "-$subslot"
 	}
 
-	for addr [list 0x4000 0x8000 0x0000] { ;# memory search order
+	foreach addr [list 0x4000 0x8000 0x0000] { ;# memory search order
 		set prefix [format %c%c [peek $addr] [peek [expr $addr + 1]]]
-		if {prefix eq "AB"} {
+		if {$prefix eq "AB"} {
 			puts "prefix found at $ss:$addr"
 			set entry_point [peek16 [expr $addr + 1]]
 			puts "entry point found at [format %04x $entry_point]"
 		}
 	}
+	puts "no cartridge signature found"
 }
 
 proc codeanalyzer_info {} {
 	error "not implemented yet."
 }
 
-proc _debugmem {} {
-	if {[catch {_checkmem} fid]} {
-		puts stderr "fid; $fid"
-		puts stderr $::errorInfo
-		debug break 
-	}
-}
-
 proc log {s} {
 	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
 		puts stderr $s
+		puts $s
 	}
 }
 
@@ -311,14 +312,11 @@ proc _checkmem {} {
 		cb { ;# rotations with (HL)
 			if {[peek $p1] == 0x06} { ;# RLC (HL)
 				markdata $hl
-			}
-			elseif {[peek $p1] == 0x0e} { ;# RRC (HL)
+			} elseif {[peek $p1] == 0x0e} { ;# RRC (HL)
 				markdata $hl
-			}
-			elseif {[peek $p1] == 0x16} { ;# RL (HL)
+			} elseif {[peek $p1] == 0x16} { ;# RL (HL)
 				markdata $hl
-			}
-			elseif {[peek $p1] == 0x1e} { ;# RL (HL)
+			} elseif {[peek $p1] == 0x1e} { ;# RL (HL)
 				markdata $hl
 			}
 		}
@@ -327,30 +325,23 @@ proc _checkmem {} {
 			if {[peek $p1] == 0x4b} { ;# XX=BC
 				set word [peek16 $p2]
 				markdata $word
-			}
-			elseif {[peek $p1] == 0x5b} { ;# XX=DE
+			} elseif {[peek $p1] == 0x5b} { ;# XX=DE
 				set word [peek16 $p2]
 				markdata $word
-			}
-			elseif {[peek $p1] == 0x6b} { ;# XX=HL
+			} elseif {[peek $p1] == 0x6b} { ;# XX=HL
 				set word [peek16 $p2]
 				markdata $word
-			}
-			elseif {[peek $p1] == 0x7b} { ;# XX=SP
+			} elseif {[peek $p1] == 0x7b} { ;# XX=SP
 				set word [peek16 $p2]
 				markdata $word
-			}
 			;# CP operations with (HL)
-			elseif {[peek $p1] == 0xa1} { ;# CPI
+			} elseif {[peek $p1] == 0xa1} { ;# CPI
 				markdata $hl
-			}
-			elseif {[peek $p1] == 0xb1} { ;# CPIR
+			} elseif {[peek $p1] == 0xb1} { ;# CPIR
 				markdata $hl
-			}
-			elseif {[peek $p1] == 0xa9} { ;# CPD
+			} elseif {[peek $p1] == 0xa9} { ;# CPD
 				markdata $hl
-			}
-			elseif {[peek $p1] == 0xb9} { ;# CPDR
+			} elseif {[peek $p1] == 0xb9} { ;# CPDR
 				markdata $hl
 			}
 		}
@@ -359,32 +350,25 @@ proc _checkmem {} {
 			if {[peek $p1] == 0x7e} { ;# X=A
 				set index [peek $p2]
 				markdata [expr $ix + $index]
-			}
-			elseif {[peek $p1] == 0x46} { ;# X=B
+			} elseif {[peek $p1] == 0x46} { ;# X=B
 				set index [peek $p2]
 				markdata [expr $ix + $index]
-			}
-			elseif {[peek $p1] == 0x4e} { ;# X=C
+			} elseif {[peek $p1] == 0x4e} { ;# X=C
 				set index [peek $p2]
 				markdata [expr $ix + $index]
-			}
-			elseif {[peek $p1] == 0x56} { ;# X=D
+			} elseif {[peek $p1] == 0x56} { ;# X=D
 				set index [peek $p2]
 				markdata [expr $ix + $index]
-			}
-			elseif {[peek $p1] == 0x5e} { ;# X=E
+			} elseif {[peek $p1] == 0x5e} { ;# X=E
 				set index [peek $p2]
 				markdata [expr $ix + $index]
-			}
-			elseif {[peek $p1] == 0x66} { ;# X=H
+			} elseif {[peek $p1] == 0x66} { ;# X=H
 				set index [peek $p2]
 				markdata [expr $ix + $index]
-			}
-			elseif {[peek $p1] == 0x6e} { ;# X=L
+			} elseif {[peek $p1] == 0x6e} { ;# X=L
 				set index [peek $p2]
 				markdata [expr $ix + $index]
-			}
-			elseif {[peek $p1] == 0x2a} {
+			} elseif {[peek $p1] == 0x2a} {
 				set word [peek16 $p2]
 				markdata $word
 			} else { ;# op (IX+index)
@@ -397,32 +381,25 @@ proc _checkmem {} {
 			if {[peek $p1] == 0x7e} { ;# X=A
 				set index [peek $p2]
 				markdata [expr $iy + $index]
-			}
-			elseif {[peek $p1] == 0x46} { ;# X=B
+			} elseif {[peek $p1] == 0x46} { ;# X=B
 				set index [peek $p2]
 				markdata [expr $iy + $index]
-			}
-			elseif {[peek $p1] == 0x4e} { ;# X=C
+			} elseif {[peek $p1] == 0x4e} { ;# X=C
 				set index [peek $p2]
 				markdata [expr $iy + $index]
-			}
-			elseif {[peek $p1] == 0x56} { ;# X=D
+			} elseif {[peek $p1] == 0x56} { ;# X=D
 				set index [peek $p2]
 				markdata [expr $iy + $index]
-			}
-			elseif {[peek $p1] == 0x5e} { ;# X=E
+			} elseif {[peek $p1] == 0x5e} { ;# X=E
 				set index [peek $p2]
 				markdata [expr $iy + $index]
-			}
-			elseif {[peek $p1] == 0x66} { ;# X=H
+			} elseif {[peek $p1] == 0x66} { ;# X=H
 				set index [peek $p2]
 				markdata [expr $iy + $index]
-			}
-			elseif {[peek $p1] == 0x6e} { ;# X=L
+			} elseif {[peek $p1] == 0x6e} { ;# X=L
 				set index [peek $p2]
 				markdata [expr $iy + $index]
-			}
-			elseif {[peek $p1] == 0x2a} {
+			} elseif {[peek $p1] == 0x2a} {
 				set word [peek16 $p2]
 				markdata $word
 			} else { ;# op (IX+index)
