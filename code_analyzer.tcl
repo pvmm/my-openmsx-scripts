@@ -67,7 +67,7 @@ proc codeanalyzer_start {args} {
 	variable subslot [lindex $args 1]
 
 	;# set condition according to slot and subslot
-	if {[info exists ::env(DEBUG)] && $::env(DEBUG) eq 1} {
+	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
 		set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_debugmem]
 	} else {
 		set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_checkmem]
@@ -88,7 +88,7 @@ proc _debugmem {} {
 }
 
 proc log {s} {
-	if {[info exists ::env(DEBUG)] && $::env(DEBUG) eq 1} {
+	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
 		puts stderr $s
 	}
 }
@@ -240,13 +240,13 @@ proc _checkmem {} {
 			if {[peek $p1] == 0x06} { ;# RLC (HL)
 				markdata $hl
 			}
-			if {[peek $p1] == 0x0e} { ;# RRC (HL)
+			elseif {[peek $p1] == 0x0e} { ;# RRC (HL)
 				markdata $hl
 			}
-			if {[peek $p1] == 0x16} { ;# RL (HL)
+			elseif {[peek $p1] == 0x16} { ;# RL (HL)
 				markdata $hl
 			}
-			if {[peek $p1] == 0x1e} { ;# RL (HL)
+			elseif {[peek $p1] == 0x1e} { ;# RL (HL)
 				markdata $hl
 			}
 		}
@@ -256,29 +256,29 @@ proc _checkmem {} {
 				set word [expr [peek $p2] + ([peek $p3] << 8)]
 				markdata $word
 			}
-			if {[peek $p1] == 0x5b} { ;# XX=DE
+			elseif {[peek $p1] == 0x5b} { ;# XX=DE
 				set word [expr [peek $p2] + ([peek $p3] << 8)]
 				markdata $word
 			}
-			if {[peek $p1] == 0x6b} { ;# XX=HL
+			elseif {[peek $p1] == 0x6b} { ;# XX=HL
 				set word [expr [peek $p2] + ([peek $p3] << 8)]
 				markdata $word
 			}
-			if {[peek $p1] == 0x7b} { ;# XX=SP
+			elseif {[peek $p1] == 0x7b} { ;# XX=SP
 				set word [expr [peek $p2] + ([peek $p3] << 8)]
 				markdata $word
 			}
 			;# CP operations with (HL)
-			if {[peek $p1] == 0xa1} { ;# CPI
+			elseif {[peek $p1] == 0xa1} { ;# CPI
 				markdata $hl
 			}
-			if {[peek $p1] == 0xb1} { ;# CPIR
+			elseif {[peek $p1] == 0xb1} { ;# CPIR
 				markdata $hl
 			}
-			if {[peek $p1] == 0xa9} { ;# CPD
+			elseif {[peek $p1] == 0xa9} { ;# CPD
 				markdata $hl
 			}
-			if {[peek $p1] == 0xb9} { ;# CPDR
+			elseif {[peek $p1] == 0xb9} { ;# CPDR
 				markdata $hl
 			}
 		}
@@ -288,31 +288,31 @@ proc _checkmem {} {
 				set index [peek $p2]
 				markdata [expr $ix + $index]
 			}
-			if {[peek $p1] == 0x46} { ;# X=B
+			elseif {[peek $p1] == 0x46} { ;# X=B
 				set index [peek $p2]
 				markdata [expr $ix + $index]
 			}
-			if {[peek $p1] == 0x4e} { ;# X=C
+			elseif {[peek $p1] == 0x4e} { ;# X=C
 				set index [peek $p2]
 				markdata [expr $ix + $index]
 			}
-			if {[peek $p1] == 0x56} { ;# X=D
+			elseif {[peek $p1] == 0x56} { ;# X=D
 				set index [peek $p2]
 				markdata [expr $ix + $index]
 			}
-			if {[peek $p1] == 0x5e} { ;# X=E
+			elseif {[peek $p1] == 0x5e} { ;# X=E
 				set index [peek $p2]
 				markdata [expr $ix + $index]
 			}
-			if {[peek $p1] == 0x66} { ;# X=H
+			elseif {[peek $p1] == 0x66} { ;# X=H
 				set index [peek $p2]
 				markdata [expr $ix + $index]
 			}
-			if {[peek $p1] == 0x6e} { ;# X=L
+			elseif {[peek $p1] == 0x6e} { ;# X=L
 				set index [peek $p2]
 				markdata [expr $ix + $index]
 			}
-			if {[peek $p1] == 0x2a} {
+			elseif {[peek $p1] == 0x2a} {
 				set word [expr [peek $p2] | ([peek $p3] << 8)]
 				markdata $word
 			} else { ;# op (IX+index)
@@ -326,31 +326,31 @@ proc _checkmem {} {
 				set index [peek $p2]
 				markdata [expr $iy + $index]
 			}
-			if {[peek $p1] == 0x46} { ;# X=B
+			elseif {[peek $p1] == 0x46} { ;# X=B
 				set index [peek $p2]
 				markdata [expr $iy + $index]
 			}
-			if {[peek $p1] == 0x4e} { ;# X=C
+			elseif {[peek $p1] == 0x4e} { ;# X=C
 				set index [peek $p2]
 				markdata [expr $iy + $index]
 			}
-			if {[peek $p1] == 0x56} { ;# X=D
+			elseif {[peek $p1] == 0x56} { ;# X=D
 				set index [peek $p2]
 				markdata [expr $iy + $index]
 			}
-			if {[peek $p1] == 0x5e} { ;# X=E
+			elseif {[peek $p1] == 0x5e} { ;# X=E
 				set index [peek $p2]
 				markdata [expr $iy + $index]
 			}
-			if {[peek $p1] == 0x66} { ;# X=H
+			elseif {[peek $p1] == 0x66} { ;# X=H
 				set index [peek $p2]
 				markdata [expr $iy + $index]
 			}
-			if {[peek $p1] == 0x6e} { ;# X=L
+			elseif {[peek $p1] == 0x6e} { ;# X=L
 				set index [peek $p2]
 				markdata [expr $iy + $index]
 			}
-			if {[peek $p1] == 0x2a} {
+			elseif {[peek $p1] == 0x2a} {
 				set word [expr [peek $p2] | ([peek $p3] << 8)]
 				markdata $word
 			} else { ;# op (IX+index)
