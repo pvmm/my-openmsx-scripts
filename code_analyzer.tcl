@@ -1,6 +1,8 @@
 namespace eval codeanalyzer {
 
 ;# TODO:
+;# * expose OpenMSX dasm to tcl scripts;
+;# * detect "AB" in ROM;
 ;# * try to detect functions;
 ;# * try to detect all types of RAM-to-VRAM memory copying:
 ;#   ** pattern generator table (PGT)
