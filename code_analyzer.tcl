@@ -1,9 +1,14 @@
 namespace eval codeanalyzer {
 
 ;# TODO:
+;# * finish all z80 instructions;
+;# * BIOS support;
 ;# * detect code size using disassembler;
 ;# * write assembly output to file;
+;# * annotate unscanned code when writing output file;
+;# * allow user to set markers on the code;
 ;# * try to detect functions;
+;#   ** detect call/ret combinations;
 ;# * try to detect all types of RAM-to-VRAM memory copying:
 ;#   ** pattern generator table (PGT)
 ;#   ** name table;
