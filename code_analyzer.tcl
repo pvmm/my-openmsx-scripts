@@ -1,6 +1,8 @@
 namespace eval codeanalyzer {
 
 ;# TODO:
+;# * detect code size using disassembler;
+;# * write assembly output to file;
 ;# * try to detect functions;
 ;# * try to detect all types of RAM-to-VRAM memory copying:
 ;#   ** pattern generator table (PGT)
@@ -157,15 +159,19 @@ proc codeanalyzer_scancart {} {
 		append ss "-$subslot"
 	}
 
+	;# TODO: change to right slot before scanning
 	foreach addr [list 0x4000 0x8000 0x0000] { ;# memory search order
 		set prefix [format %c%c [peek $addr] [peek [expr $addr + 1]]]
+		puts "$addr - $prefix"
 		if {$prefix eq "AB"} {
 			puts "prefix found at $ss:$addr"
-			set entry_point [peek16 [expr $addr + 1]]
+			set entry_point [peek16 [expr $addr + 2]]
 			puts "entry point found at [format %04x $entry_point]"
 		}
 	}
-	puts "no cartridge signature found"
+	if {$entry_point eq ""} {
+		puts "no cartridge signature found"
+	}
 }
 
 proc codeanalyzer_info {} {
