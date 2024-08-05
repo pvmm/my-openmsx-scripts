@@ -99,35 +99,58 @@ proc _codeanalyzer {args} {
 
 proc slot {} {
 	variable slot
-	return [lindex $slot 0]
+	if {[info exists slot]} {
+		return [lindex $slot 0]
+	}
+	return {}
 }
 
 proc subslot {} {
 	variable slot
-	return [lindex $slot 1]
+	if {[info exists slot]} {
+		return [lindex $slot 1]
+	}
+	return {}
+}
+
+proc reset_info {} {
+	variable m_type ""
+	variable m
+	unset m
+	variable entry_point ""
+	variable datarecs 0
+	variable coderecs 0
+	variable bothrecs 0
 }
 
 proc codeanalyzer_start {args} {
+	variable m_type
 	variable pc {}
 	variable entry_point
 	variable cond
 
 	if {$args eq {} || [llength $args] > 2} {
-		error "wrong # args: should be slot subslot"
+		error "wrong # args: should be slot ?subslot?"
 	}
 
 	;# check slot subslot configuration
-	variable slot [lrange $args 0 end]
-	if {[machine_info issubslotted [slot]]} {
-		if {[subslot] eq ""} {
+	set tmp [lrange $args 0 end]
+	if {[machine_info issubslotted [lindex $tmp 0]]} {
+		if {[llength $tmp] ne 2} {
 			error "slot $slot is extended but subslot parameter is missing."
 		}
-	} elseif {[subslot] ne ""} {
+	} elseif {[llength $tmp] ne 1} {
 		error "slot is not extended but subslot is defined."
 	}
+	variable slot
+	if {[info exists slot] && $slot ne $args} {
+		puts "resetting entry point"
+		reset_info
+	}
+	set slot $tmp
 	;# set condition according to slot and subslot
 	if {$cond eq ""} {
-		puts "Codeanalyzer started."
+		puts "codeanalyzer started"
 		if {$entry_point eq ""} {
 			codeanalyzer_scancart
 		}
@@ -151,6 +174,17 @@ proc codeanalyzer_stop {} {
 	}
 }
 
+proc _scanmemtype {} {
+	variable m_type
+	set byte [peek [reg PC]]
+	poke [reg PC] [expr $byte ^ 1]
+	if {[peek [reg PC]] eq $byte} {
+		set m_type ROM
+	} else {
+		set m_type RAM
+	}
+}
+
 proc codeanalyzer_scancart {} {
 	variable slot
 	variable subslot
@@ -158,7 +192,7 @@ proc codeanalyzer_scancart {} {
 	if {![info exists slot]} {
 		error "no slot defined"
 	}
-	variable ss $slot
+	variable ss [slot]
 	if {[machine_info issubslotted [slot]]} {
 		if {[subslot] eq ""} {
 			error "no subslot defined"
@@ -166,41 +200,31 @@ proc codeanalyzer_scancart {} {
 		append ss "-[subslot]"
 	}
 
-	debug set_condition "\[pc_in_slot $slot\]" -once codeanalyzer::_do_scancart
+	_scancart
 }
 
-proc _scanrom {} {
-	variable m_type
-	foreach addr [list 0x0000 0x4000 0x8000 0xc000] { ;# scan each page
-		set tmp [peek $addr]
-		poke $addr [expr $tmp ^ 1]
-		if {[peek $addr] == $tmp} {
-			append m_type " ROM"
-		} else {
-			append m_type " RAM"
-		}
-		poke $addr [expr $tmp ^ 1]
-	}
-	set m_type [string trimleft $m_type]
-}
-
-proc _do_scancart {} {
+proc _scancart {} {
 	variable m_type
 	variable ss
 	variable slot
 	variable entry_point
 
-	_scanrom
-	foreach addr [list 0x4000 0x8000 0x0000] { ;# memory search order
-		set prefix [format %c%c [peek $addr] [peek [expr $addr + 1]]]
+	set base [expr [slot] << 18]
+	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
+		set addr [expr $base + $offset]
+		set tmp [peek16 $addr {slotted memory}]
+		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
 		if {$prefix eq "AB"} {
+			set m_type ROM
 			puts "prefix found at $ss:$addr"
-			set entry_point [peek16 [expr $addr + 2]]
+			set entry_point [peek16 [expr $addr + 2] {slotted memory}]
 			puts "entry point found at [format %04x $entry_point]"
 		}
 	}
 	if {$entry_point eq ""} {
 		puts "no cartridge signature found"
+		set entry_point ""
+		debug set_condition "\[pc_in_slot $slot\]" -once codeanalyzer::_scanmemtype
 	}
 }
 
@@ -218,7 +242,12 @@ proc codeanalyzer_info {} {
 	variable cond
 
 	puts "running on slot $ss"
-	puts "memory type: $m_type"
+	puts -nonewline "memory type: "
+	if {$m_type ne ""} {
+		puts $m_type
+	} else {
+		puts "???"
+	}
 	puts -nonewline "entry point: "
 	if {$entry_point ne ""} {
 		puts [format %04x $entry_point]
