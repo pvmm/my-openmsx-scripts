@@ -154,7 +154,6 @@ proc codeanalyzer_stop {} {
 proc codeanalyzer_scancart {} {
 	variable slot
 	variable subslot
-	variable entry_point
 
 	if {![info exists slot]} {
 		error "no slot defined"
@@ -174,6 +173,7 @@ proc _do_scancart {} {
 	variable m_type
 	variable ss
 	variable slot
+	variable entry_point
 
 	foreach addr [list 0x4000 0x8000 0x0000] { ;# memory search order
 		set prefix [format %c%c [peek $addr] [peek [expr $addr + 1]]]
@@ -204,10 +204,11 @@ proc codeanalyzer_info {} {
 
 	puts "running on slot $ss"
 	puts "memory type: $m_type"
-	if {$entry_point eq ""} {
-		puts "entry point is undefined"
+	puts -nonewline "entry point: "
+	if {$entry_point ne ""} {
+		puts [format %04x $entry_point]
 	} else {
-		puts "entry point is [format %04x $entry_point]"
+		puts "undefined"
 	}
 	puts "number of DATA records: $datarecs"
 	puts "number of CODE records: $coderecs"
