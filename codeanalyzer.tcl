@@ -429,26 +429,8 @@ proc _checkmem {} {
 				b9 { markdata $hl }
 				a0 { markdata $hl $de }
 				a8 { markdata $hl $de }
-				b0 {
-					set bc_ $bc
-					set hl_ $hl
-					set de_ $de
-					for {} {$bc_ != -1} {incr bc_ -1} {
-						markdata $hl_ $de_
-						incr hl_
-						incr de_
-					}
-				}
-				b8 {
-					set bc_ $bc
-					set hl_ $hl
-					set de_ $de
-					for {} {$bc_ != -1} {incr bc_ -1} {
-						markdata $hl_ $de_
-						incr hl_ -1
-						incr de_ -1
-					}
-				}
+				b0 { markdata $hl $de }
+				b8 { markdata $hl $de }
 			}
 		}
 		dd { ;# operation with IX somewhere
