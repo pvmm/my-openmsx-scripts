@@ -216,7 +216,7 @@ proc _scancart {} {
 		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
 		if {$prefix eq "AB"} {
 			set m_type ROM
-			puts "prefix found at $ss:$addr"
+			puts "prefix found at $ss:[format %04x [expr $addr & 0xffff]]"
 			set entry_point [peek16 [expr $addr + 2] {slotted memory}]
 			puts "entry point found at [format %04x $entry_point]"
 		}
@@ -273,7 +273,7 @@ proc log {s} {
 	}
 }
 
-proc markdata {addr} {
+proc _markdata {addr} {
 	variable m
 	variable slot
 	variable datarecs
@@ -291,6 +291,11 @@ proc markdata {addr} {
 		incr coderecs -1
 		incr bothrecs
 	}
+}
+
+proc markdata {first args} {
+	_markdata $first
+	foreach addr $args { _markdata $addr }
 }
 
 proc markcode {addr} {
@@ -330,286 +335,150 @@ proc _checkmem {} {
 	}
 	;# DATA memory
 	switch -- [format %02x [peek $pc]] {
-		02 { ;# LD (BC),A
-			markdata $bc
-		}
-		12 { ;# LD (DE),A
-			markdata $de
-		}
-		32 { ;# LD (word),A
-			set word [peek16 $p1]
-			markdata $word
-		}
-		7e { ;# LD A,(HL)
-			markdata $hl
-		}
-		46 { ;# LD B,(HL)
-			markdata $hl
-		}
-		4e { ;# LD C,(HL)
-			markdata $hl
-		}
-		56 { ;# LD D,(HL)
-			markdata $hl
-		}
-		5e { ;# LD E,(HL)
-			markdata $hl
-		}
-		66 { ;# LD H,(HL)
-			markdata $hl
-		}
-		6e { ;# LD L,(HL)
-			markdata $hl
-		}
-		77 { ;# LD (HL),A
-			markdata $hl
-		}
-		70 { ;# LD (HL),B
-			markdata $hl
-		}
-		71 { ;# LD (HL),C
-			markdata $hl
-		}
-		72 { ;# LD (HL),D
-			markdata $hl
-		}
-		73 { ;# LD (HL),E
-			markdata $hl
-		}
-		74 { ;# LD (HL),H
-			markdata $hl
-		}
-		75 { ;# LD (HL),L
-			markdata $hl
-		}
-		0a { ;# LD A,(BC)
-			markdata $bc
-		}
-		1a { ;# LD A,(DE)
-			markdata $de
-		}
-		2a { ;# LD HL,(word)
-			set word [peek16 $p1]
-			markdata $word
-		}
-		34 { ;# INC (HL)
-			markdata $hl
-		}
-		35 { ;# DEC (HL)
-			markdata $hl
-		}
-		36 { ;# LD (HL),byte
-			markdata $hl
-		}
-		3a { ;# LD A,(word) # 0x3a
-			set word [peek16 $p1]
-			markdata $word
-		}
-		86 { ;# ADD A, (HL)
-			markdata $hl
-		}
-		8e { ;# ADC A, (HL)
-			markdata $hl
-		}
-		96 { ;# SUB A, (HL)
-			markdata $hl
-		}
-		9e { ;# SBC A, (HL)
-			markdata $hl
-		}
-		a6 { ;# AND (HL)
-			markdata $hl
-		}
-		ae { ;# XOR (HL)
-			markdata $hl
-		}
-		b6 { ;# OR (HL)
-			markdata $hl
-		}
-		be { ;# CP (HL)
-			markdata $hl
-		}
-		cb { ;# rotations with (HL)
-			if {[peek $p1] == 0x06} { ;# RLC (HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x0e} { ;# RRC (HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x16} { ;# RL (HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x1e} { ;# RL (HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x26} { ;# SLA (HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x2e} { ;# SRA (HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x3e} { ;# SRL (HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x46} { ;# BIT 0,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x4e} { ;# BIT 1,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x56} { ;# BIT 2,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x5e} { ;# BIT 3,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x66} { ;# BIT 4,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x6e} { ;# BIT 5,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x76} { ;# BIT 6,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x7e} { ;# BIT 7,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x86} { ;# RES 0,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x8e} { ;# RES 1,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x96} { ;# RES 2,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0x9e} { ;# RES 3,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xa6} { ;# RES 4,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xae} { ;# RES 5,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xb6} { ;# RES 6,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xbe} { ;# RES 7,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xc6} { ;# BIT 0,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xce} { ;# BIT 1,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xd6} { ;# BIT 2,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xde} { ;# BIT 3,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xe6} { ;# BIT 4,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xee} { ;# BIT 5,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xf6} { ;# BIT 6,(HL)
-				markdata $hl
-			} elseif {[peek $p1] == 0xfe} { ;# BIT 7,(HL)
-				markdata $hl
+		02 { markdata $bc }
+		0a { markdata $bc }
+		10 { markcode [peek $p1] }
+		12 { markdata $de }
+		18 { markcode [expr $pc + [peek $p1]] }
+		1a { markdata $de }
+		20 { markcode [expr $pc + [peek $p1]] }
+		28 { markcode [expr $pc + [peek $p1]] }
+		2a { markdata [peek16 $p1] }
+		30 { markcode [expr $pc + [peek $p1]] }
+		32 { markdata [peek16 $p1] }
+		34 { markdata $hl }
+		35 { markdata $hl }
+		36 { markdata $hl }
+		38 { markcode [expr $pc + [peek $p1]] }
+		3a { markdata [peek16 $p1] }
+		46 { markdata $hl }
+		4e { markdata $hl }
+		56 { markdata $hl }
+		5e { markdata $hl }
+		66 { markdata $hl }
+		6e { markdata $hl }
+		70 { markdata $hl }
+		71 { markdata $hl }
+		72 { markdata $hl }
+		73 { markdata $hl }
+		74 { markdata $hl }
+		75 { markdata $hl }
+		77 { markdata $hl }
+		7e { markdata $hl }
+		86 { markdata $hl }
+		8e { markdata $hl }
+		96 { markdata $hl }
+		9e { markdata $hl }
+		a6 { markdata $hl }
+		ae { markdata $hl }
+		b6 { markdata $hl }
+		be { markdata $hl }
+		c4 { markcode [peek16 $p1] }
+		cb { ;# bit operations with (HL)
+			switch -- [format %02x [peek $p1]] {
+				06 { markdata $hl }
+				0e { markdata $hl }
+				16 { markdata $hl }
+				1e { markdata $hl }
+				26 { markdata $hl }
+				2e { markdata $hl }
+				36 { markdata $hl }
+				3e { markdata $hl }
+				46 { markdata $hl }
+				4e { markdata $hl }
+				56 { markdata $hl }
+				5e { markdata $hl }
+				66 { markdata $hl }
+				6e { markdata $hl }
+				76 { markdata $hl }
+				7e { markdata $hl }
+				86 { markdata $hl }
+				8e { markdata $hl }
+				96 { markdata $hl }
+				9e { markdata $hl }
+				a6 { markdata $hl }
+				ae { markdata $hl }
+				b6 { markdata $hl }
+				be { markdata $hl }
+				c6 { markdata $hl }
+				ce { markdata $hl }
+				d6 { markdata $hl }
+				de { markdata $hl }
+				e6 { markdata $hl }
+				ee { markdata $hl }
+				f6 { markdata $hl }
+				fe { markdata $hl }
 			}
 		}
-		e9 { ;# JP (HL)
-			markcode $hl
-		}
+		cc { markcode [peek16 $p1] }
+		cd { markcode [peek16 $p1] }
+		d4 { markcode [peek16 $p1] }
+		dc { markcode [peek16 $p1] }
+		e4 { markcode [peek16 $p1] }
+		e9 { markcode $hl }
+		ec { markcode [peek16 $p1] }
 		ed {
-			;# LD XX, (word)
-			if {[peek $p1] == 0x4b} { ;# XX=BC
-				set word [peek16 $p2]
-				markdata $word
-			} elseif {[peek $p1] == 0x5b} { ;# XX=DE
-				set word [peek16 $p2]
-				markdata $word
-			} elseif {[peek $p1] == 0x6b} { ;# XX=HL
-				set word [peek16 $p2]
-				markdata $word
-			} elseif {[peek $p1] == 0x7b} { ;# XX=SP
-				set word [peek16 $p2]
-				markdata $word
-			;# CP operations with (HL)
-			} elseif {[peek $p1] == 0xa1} { ;# CPI
-				markdata $hl
-			} elseif {[peek $p1] == 0xb1} { ;# CPIR
-				markdata $hl
-			} elseif {[peek $p1] == 0xa9} { ;# CPD
-				markdata $hl
-			} elseif {[peek $p1] == 0xb9} { ;# CPDR
-				markdata $hl
-			} elseif {[peek $p1] == 0xa0} { ;# LDI
-				markdata $hl
-				markdata $de
-			} elseif {[peek $p1] == 0xa8} { ;# LDD
-				markdata $hl
-				markdata $de
-			} elseif {[peek $p1] == 0xb0} { ;# LDIR
-				set bc_ $bc
-				set hl_ $hl
-				set de_ $de
-				for {} {$bc_ != -1} {incr bc_ -1} {
-					markdata $hl_
-					markdata $de_
-					incr hl_
-					incr de_
+			switch -- [format %02x [peek $p1]] {
+				4b { markdata [peek16 $p2] }
+				5b { markdata [peek16 $p2] }
+				6b { markdata [peek16 $p2] }
+				7b { markdata [peek16 $p2] }
+				a1 { markdata $hl }
+				a9 { markdata $hl }
+				b1 { markdata $hl }
+				b9 { markdata $hl }
+				a0 { markdata $hl $de }
+				a8 { markdata $hl $de }
+				b0 {
+					set bc_ $bc
+					set hl_ $hl
+					set de_ $de
+					for {} {$bc_ != -1} {incr bc_ -1} {
+						markdata $hl_ $de_
+						incr hl_
+						incr de_
+					}
 				}
-			} elseif {[peek $p1] == 0xb8} { ;# LDDR
-				set bc_ $bc
-				set hl_ $hl
-				set de_ $de
-				for {} {$bc_ != -1} {incr bc_ -1} {
-					markdata $hl_
-					markdata $de_
-					incr hl_ -1
-					incr de_ -1
+				b8 {
+					set bc_ $bc
+					set hl_ $hl
+					set de_ $de
+					for {} {$bc_ != -1} {incr bc_ -1} {
+						markdata $hl_ $de_
+						incr hl_ -1
+						incr de_ -1
+					}
 				}
 			}
 		}
 		dd { ;# operation with IX somewhere
-			if {[peek $p1] == 0xe9} { ;# JP (IX)
-				markcode $ix
-			} elseif {[peek $p1] == 0x7e} { ;# LD X=A, (IX + index)
-				set index [peek $p2]
-				markdata [expr $ix + $index]
-			} elseif {[peek $p1] == 0x46} { ;# X=B
-				set index [peek $p2]
-				markdata [expr $ix + $index]
-			} elseif {[peek $p1] == 0x4e} { ;# X=C
-				set index [peek $p2]
-				markdata [expr $ix + $index]
-			} elseif {[peek $p1] == 0x56} { ;# X=D
-				set index [peek $p2]
-				markdata [expr $ix + $index]
-			} elseif {[peek $p1] == 0x5e} { ;# X=E
-				set index [peek $p2]
-				markdata [expr $ix + $index]
-			} elseif {[peek $p1] == 0x66} { ;# X=H
-				set index [peek $p2]
-				markdata [expr $ix + $index]
-			} elseif {[peek $p1] == 0x6e} { ;# X=L
-				set index [peek $p2]
-				markdata [expr $ix + $index]
-			} elseif {[peek $p1] == 0x2a} {
-				set word [peek16 $p2]
-				markdata $word
-			} else { ;# op (IX+index)
-				set index [peek $p2]
-				markdata [expr $ix + $index]
+			switch -- [format %02x [peek $p1]] {
+				2a      { markdata [expr [peek16 $p2]] }
+				46      { markdata [expr $ix + [peek $p2]] }
+				4e      { markdata [expr $ix + [peek $p2]] }
+				56      { markdata [expr $ix + [peek $p2]] }
+				5e      { markdata [expr $ix + [peek $p2]] }
+				66      { markdata [expr $ix + [peek $p2]] }
+				6e      { markdata [expr $ix + [peek $p2]] }
+				7e      { markdata [expr $ix + [peek $p2]] }
+				e9      { markcode $ix }
+				default { markdata [expr $ix + [peek $p2]] }
 			}
 		}
+		f4 { markcode [peek16 $p1] }
+		fc { markcode [peek16 $p1] }
 		fd { ;# operation with IY somewhere
-			if {[peek $p1] == 0xe9} { ;# JP (IY)
-				markcode $iy
-			} elseif {[peek $p1] == 0x7e} { ;# LD X,(IY + index)
-				set index [peek $p2]
-				markdata [expr $iy + $index]
-			} elseif {[peek $p1] == 0x46} { ;# X=B
-				set index [peek $p2]
-				markdata [expr $iy + $index]
-			} elseif {[peek $p1] == 0x4e} { ;# X=C
-				set index [peek $p2]
-				markdata [expr $iy + $index]
-			} elseif {[peek $p1] == 0x56} { ;# X=D
-				set index [peek $p2]
-				markdata [expr $iy + $index]
-			} elseif {[peek $p1] == 0x5e} { ;# X=E
-				set index [peek $p2]
-				markdata [expr $iy + $index]
-			} elseif {[peek $p1] == 0x66} { ;# X=H
-				set index [peek $p2]
-				markdata [expr $iy + $index]
-			} elseif {[peek $p1] == 0x6e} { ;# X=L
-				set index [peek $p2]
-				markdata [expr $iy + $index]
-			} elseif {[peek $p1] == 0x2a} {
-				set word [peek16 $p2]
-				markdata $word
-			} else { ;# op (IX+index)
-				set index [peek $p2]
-				markdata [expr $iy + $index]
+			switch -- [peek $p1] {
+				2a      { markdata [peek16 $p2] }
+				46      { markdata [expr $iy + [peek $p2]] }
+				4e      { markdata [expr $iy + [peek $p2]] }
+				56      { markdata [expr $iy + [peek $p2]] }
+				5e      { markdata [expr $iy + [peek $p2]] }
+				66      { markdata [expr $iy + [peek $p2]] }
+				6e      { markdata [expr $iy + [peek $p2]] }
+				7e      { markdata [expr $iy + [peek $p2]] }
+				e9      { markcode $iy }
+				default { markdata [expr $iy + [peek $p2]] }
 			}
 		}
 	}
