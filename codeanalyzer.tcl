@@ -19,7 +19,7 @@ namespace eval codeanalyzer {
 ;# * try to detect joystick port input;
 ;# * try to detect sound generation (PSG);
 
-variable m_type RAM
+variable m_type ""
 variable m ;# memory
 variable pc
 variable slot
@@ -169,17 +169,32 @@ proc codeanalyzer_scancart {} {
 	debug set_condition "\[pc_in_slot $slot\]" -once codeanalyzer::_do_scancart
 }
 
+proc _scanrom {} {
+	variable m_type
+	foreach addr [list 0x0000 0x4000 0x8000 0xc000] { ;# scan each page
+		set tmp [peek $addr]
+		poke $addr [expr $tmp ^ 1]
+		if {[peek $addr] == $tmp} {
+			append m_type " ROM"
+		} else {
+			append m_type " RAM"
+		}
+		poke $addr [expr $tmp ^ 1]
+	}
+	set m_type [string trimleft $m_type]
+}
+
 proc _do_scancart {} {
 	variable m_type
 	variable ss
 	variable slot
 	variable entry_point
 
+	_scanrom
 	foreach addr [list 0x4000 0x8000 0x0000] { ;# memory search order
 		set prefix [format %c%c [peek $addr] [peek [expr $addr + 1]]]
 		if {$prefix eq "AB"} {
 			puts "prefix found at $ss:$addr"
-			set m_type ROM
 			set entry_point [peek16 [expr $addr + 2]]
 			puts "entry point found at [format %04x $entry_point]"
 		}
