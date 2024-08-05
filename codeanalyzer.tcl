@@ -2,6 +2,8 @@ namespace eval codeanalyzer {
 
 ;# TODO:
 ;# * finish all z80 instructions;
+;#   ** INI,IND,INIR,INDR,OUTI,OUTIR,OUTD,OUTDR
+;#   ** explore conditional branches (specially when it falls through)
 ;# * BIOS support;
 ;# * detect code size using disassembler;
 ;# * write assembly output to file;
