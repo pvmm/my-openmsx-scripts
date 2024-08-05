@@ -467,6 +467,32 @@ proc _checkmem {} {
 				markdata $hl
 			} elseif {[peek $p1] == 0xb9} { ;# CPDR
 				markdata $hl
+			} elseif {[peek $p1] == 0xa0} { ;# LDI
+				markdata $hl
+				markdata $de
+			} elseif {[peek $p1] == 0xa8} { ;# LDD
+				markdata $hl
+				markdata $de
+			} elseif {[peek $p1] == 0xb0} { ;# LDIR
+				set bc_ $bc
+				set hl_ $hl
+				set de_ $de
+				for {} {$bc_ != -1} {incr bc_ -1} {
+					markdata $hl_
+					markdata $de_
+					incr hl_
+					incr de_
+				}
+			} elseif {[peek $p1] == 0xb8} { ;# LDDR
+				set bc_ $bc
+				set hl_ $hl
+				set de_ $de
+				for {} {$bc_ != -1} {incr bc_ -1} {
+					markdata $hl_
+					markdata $de_
+					incr hl_ -1
+					incr de_ -1
+				}
 			}
 		}
 		dd { ;# operation with IX somewhere
