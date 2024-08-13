@@ -28,11 +28,13 @@ variable slot
 variable segment
 variable ss ""
 variable cond {}
+variable r_wp {}
+variable w_wp {}
 variable entry_point {}
 # info
-variable datarecs 0 ;# data records
-variable coderecs 0 ;# code records
-variable bothrecs 0 ;# both records
+variable DATA_recs 0 ;# data records
+variable CODE_recs 0 ;# code records
+variable BOTH_recs 0 ;# both DATA and CODE records
 
 ;# constants
 proc NAUGHT	{} { return {}}
@@ -70,13 +72,17 @@ Syntax: codeanalyzer info
 
 Syntax: codeanalyzer pixel <x> <y>
 }}
+		"dump" { return {Dump source code to a file.
+
+Syntax: codeanalyzer dump <filename>
+}}
 		default { error "Unknown command \"[lindex $args 1]\"."
 }
 	}
 }
 
 proc codeanalyzer {args} {
-	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
+	if {[env DEBUG] ne 0} {
 		if {[catch {_codeanalyzer {*}$args} fid]} {
 			debug break 
 			puts stderr $::errorInfo
@@ -95,24 +101,37 @@ proc _codeanalyzer {args} {
 		"stop"     { return [codeanalyzer_stop {*}$params] }
 		"scancart" { return [codeanalyzer_scancart {*}$params] }
 		"info"     { return [codeanalyzer_info {*}$params] }
+		"dump"     { return [codeanalyzer_dump {*}$params] }
 		default    { error "Unknown command \"[lindex $args 0]\"." }
 	}
 }
 
 proc slot {} {
 	variable slot
-	if {[info exists slot]} {
-		return [lindex $slot 0]
+	if {![info exists slot]} {
+		error "no slot defined"
 	}
-	return {}
+	return [lindex $slot 0]
 }
 
-proc subslot {} {
+proc subslot {{defaults {}}} {
 	variable slot
-	if {[info exists slot]} {
-		return [lindex $slot 1]
+	if {![info exists slot]} {
+		error "no slot defined"
 	}
-	return {}
+	if {[lindex $slot 1] eq {}} {
+		return $defaults
+	}
+	return [lindex $slot 1]
+}
+
+;# Get full address in {slotted memory} format: [slot][subslot][64kb addr]
+proc fulladdr {addr} {
+	variable slot
+	if {![info exists slot]} {
+		error "no slot defined"
+	}
+	return [expr ([slot] << 18) | ([subslot 0] << 16) | $addr]
 }
 
 proc reset_info {} {
@@ -120,9 +139,9 @@ proc reset_info {} {
 	variable m
 	unset m
 	variable entry_point ""
-	variable datarecs 0
-	variable coderecs 0
-	variable bothrecs 0
+	variable DATA_recs 0
+	variable CODE_recs 0
+	variable BOTH_recs 0
 }
 
 proc codeanalyzer_start {args} {
@@ -130,6 +149,8 @@ proc codeanalyzer_start {args} {
 	variable pc {}
 	variable entry_point
 	variable cond
+	variable r_wp
+	variable w_wp
 
 	if {$args eq {} || [llength $args] > 2} {
 		error "wrong # args: should be slot ?subslot?"
@@ -156,7 +177,9 @@ proc codeanalyzer_start {args} {
 		if {$entry_point eq ""} {
 			codeanalyzer_scancart
 		}
-		set cond [debug set_condition "\[pc_in_slot $slot\]" codeanalyzer::_checkmem]
+		set cond [debug set_condition "\[pc_in_slot $slot\]"        codeanalyzer::_check_mem]
+		set r_wp [debug set_watchpoint read_mem  {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_read_mem ]
+		set w_wp [debug set_watchpoint write_mem {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_write_mem]
 	} else {
 		puts "Nothing to start."
 	}
@@ -166,11 +189,15 @@ proc codeanalyzer_start {args} {
 
 proc codeanalyzer_stop {} {
 	variable cond
+	variable r_wp
+	variable w_wp
 
 	if {$cond ne ""} {
 		puts "Codeanalyzer stopped."
 		debug remove_condition $cond
 		set cond ""
+		set r_wp ""
+		set w_wp ""
 	} else {
 		puts "Nothing to stop."
 	}
@@ -178,9 +205,10 @@ proc codeanalyzer_stop {} {
 
 proc _scanmemtype {} {
 	variable m_type
-	set byte [peek [reg PC]]
-	poke [reg PC] [expr $byte ^ 1]
-	if {[peek [reg PC]] eq $byte} {
+	set addr [fulladdr [reg PC]]
+	set byte [peek $addr {slotted memory}]
+	poke $addr [expr $byte ^ 1] {slotted memory}
+	if {[peek $addr {slotted memory}] eq $byte} {
 		set m_type ROM
 	} else {
 		set m_type RAM
@@ -210,10 +238,8 @@ proc _scancart {} {
 	variable ss
 	variable slot
 	variable entry_point
-
-	set base [expr [slot] << 18]
 	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
-		set addr [expr $base + $offset]
+		set addr [fulladdr $offset]
 		set tmp [peek16 $addr {slotted memory}]
 		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
 		if {$prefix eq "AB"} {
@@ -238,9 +264,9 @@ proc codeanalyzer_info {} {
 
 	variable m_type
 	variable entry_point
-	variable datarecs
-	variable coderecs
-	variable bothrecs
+	variable DATA_recs
+	variable CODE_recs
+	variable BOTH_recs
 	variable cond
 
 	puts "running on slot $ss"
@@ -256,9 +282,9 @@ proc codeanalyzer_info {} {
 	} else {
 		puts "undefined"
 	}
-	puts "number of DATA records: $datarecs"
-	puts "number of CODE records: $coderecs"
-	puts "number of BOTH records: $bothrecs"
+	puts "number of DATA records: $DATA_recs"
+	puts "number of CODE records: $CODE_recs"
+	puts "number of BOTH records: $BOTH_recs"
 
 	puts -nonewline "codeanalyzer "
 	if {$cond ne ""} {
@@ -269,57 +295,99 @@ proc codeanalyzer_info {} {
 }
 
 proc log {s} {
-	if {[info exists ::env(DEBUG)] && $::env(DEBUG) ne 0} {
+	if {[env DEBUG] ne 0} {
 		puts stderr $s
 		puts $s
 	}
 }
 
-proc _markdata {addr} {
+proc env {varname {defaults {}}} {
+	if {[info exists ::env($varname)]} {
+		return $::env($varname);
+	}
+	return $defaults;
+}
+
+proc mark_DATA {addr} {
 	variable m
 	variable slot
-	variable datarecs
-	variable coderecs
-	variable bothrecs
-	set type [array get m $addr]
+	variable DATA_recs
+	variable CODE_recs
+	variable BOTH_recs
 
+	set addr [fulladdr $addr]
+	set type [array get m $addr]
+	log "D) type = $type, addr = [format %06x $addr]"
 	if {$type eq [NAUGHT]} {
 		set m($addr) [DATA]
-		log "marking [format %04x $addr] as DATA"
-		incr datarecs
+		if {[env LOGLEVEL] eq 1} {
+			log "marking [format %04x [expr $addr & 0xffff]] as DATA"
+		}
+		incr DATA_recs
 	} elseif {$m($addr) eq [CODE]} {
-		log "warning: overwritting address type in [format %04x $addr] from CODE to BOTH"
+		log "warning: overwritting address type in [format %04x [expr $addr & 0xffff]] from CODE to BOTH"
 		set m($addr) [BOTH]
-		incr coderecs -1
-		incr bothrecs
+		incr CODE_recs -1
+		incr BOTH_recs
 	}
 }
 
-proc markdata {first args} {
-	_markdata $first
-	foreach addr $args { _markdata $addr }
+proc mark_DATA_v {first args} {
+	;# v is for variable args
+	mark_DATA $first
+	foreach addr $args { mark_DATA $addr }
 }
 
-proc markcode {addr} {
-	variable m
-	variable datarecs
-	variable coderecs
-	variable bothrecs
-	set type [array get m $addr]
+proc mark_JP_c {index} {
+	;# c is for conditional jump
+	;# mark all possible paths (branch or not)
+	mark_CODE [expr [reg PC] + $index]
+	mark_CODE [expr [reg PC] + 2]
+}
 
+proc mark_CALL {addr} {
+	;# mark all possible paths (branch and return)
+	mark_CODE $addr
+	mark_CODE [expr [reg PC] + 2]
+}
+
+proc mark_CODE {addr} {
+	variable m
+	variable DATA_recs
+	variable CODE_recs
+	variable BOTH_recs
+
+	set type [array get m $addr]
+	set addr [fulladdr $addr]
+	log "C) type = $type, addr = [format %06x $addr]"
 	if {$type eq [NAUGHT]} {
 		set m($addr) [CODE]
-		log "marking [format %04x $addr] as CODE"
-		incr coderecs
+		if {[env LOGLEVEL] eq 1} {
+			log "marking [format %04x [expr $addr & 0xffff]] as CODE"
+		}
+		incr CODE_recs
 	} elseif {$m($addr) eq [DATA]} {
-		log "warning: overwritting address type in [format %04x $addr] from DATA to BOTH"
+		log "warning: overwritting address type in [format %04x [expr $addr & 0xffff]] from DATA to BOTH"
 		set m($addr) [BOTH]
-		incr datarecs -1
-		incr bothrecs
+		incr DATA_recs -1
+		incr BOTH_recs
 	}
 }
 
-proc _checkmem {} {
+proc _read_mem {} {
+	set a [fulladdr $::wp_last_address]
+	log "R) a = $a"
+	mark_DATA [fulladdr $::wp_last_address]
+}
+
+proc _write_mem {} {
+	set a [fulladdr $::wp_last_address]
+	set b [$::wp_last_value]
+	log "W) ab = $a, $b"
+	mark_DATA [fulladdr $::wp_last_address]
+}
+
+proc _check_mem {} {
 	variable m
 	variable pc [reg PC]
 	variable hl [reg HL]
@@ -331,141 +399,97 @@ proc _checkmem {} {
 	variable p2 [expr $pc + 2]
 	variable p3 [expr $pc + 3]
 
-	;# CODE memory
-	if {[array get m $pc] eq ""} {
-		markcode $pc
-	}
-	;# DATA memory
-	switch -- [format %02x [peek $pc]] {
-		02 { markdata $bc }
-		0a { markdata $bc }
-		10 { markcode [peek $p1] }
-		12 { markdata $de }
-		18 { markcode [expr $pc + [peek $p1]] }
-		1a { markdata $de }
-		20 { markcode [expr $pc + [peek $p1]] }
-		28 { markcode [expr $pc + [peek $p1]] }
-		2a { markdata [peek16 $p1] }
-		30 { markcode [expr $pc + [peek $p1]] }
-		32 { markdata [peek16 $p1] }
-		34 { markdata $hl }
-		35 { markdata $hl }
-		36 { markdata $hl }
-		38 { markcode [expr $pc + [peek $p1]] }
-		3a { markdata [peek16 $p1] }
-		46 { markdata $hl }
-		4e { markdata $hl }
-		56 { markdata $hl }
-		5e { markdata $hl }
-		66 { markdata $hl }
-		6e { markdata $hl }
-		70 { markdata $hl }
-		71 { markdata $hl }
-		72 { markdata $hl }
-		73 { markdata $hl }
-		74 { markdata $hl }
-		75 { markdata $hl }
-		77 { markdata $hl }
-		7e { markdata $hl }
-		86 { markdata $hl }
-		8e { markdata $hl }
-		96 { markdata $hl }
-		9e { markdata $hl }
-		a6 { markdata $hl }
-		ae { markdata $hl }
-		b6 { markdata $hl }
-		be { markdata $hl }
-		c4 { markcode [peek16 $p1] }
-		cb { ;# bit operations with (HL)
-			switch -- [format %02x [peek $p1]] {
-				06 { markdata $hl }
-				0e { markdata $hl }
-				16 { markdata $hl }
-				1e { markdata $hl }
-				26 { markdata $hl }
-				2e { markdata $hl }
-				36 { markdata $hl }
-				3e { markdata $hl }
-				46 { markdata $hl }
-				4e { markdata $hl }
-				56 { markdata $hl }
-				5e { markdata $hl }
-				66 { markdata $hl }
-				6e { markdata $hl }
-				76 { markdata $hl }
-				7e { markdata $hl }
-				86 { markdata $hl }
-				8e { markdata $hl }
-				96 { markdata $hl }
-				9e { markdata $hl }
-				a6 { markdata $hl }
-				ae { markdata $hl }
-				b6 { markdata $hl }
-				be { markdata $hl }
-				c6 { markdata $hl }
-				ce { markdata $hl }
-				d6 { markdata $hl }
-				de { markdata $hl }
-				e6 { markdata $hl }
-				ee { markdata $hl }
-				f6 { markdata $hl }
-				fe { markdata $hl }
-			}
+	;# mark PC address as CODE
+	mark_CODE $pc
+
+	;# mark instruction parameter as CODE
+	switch -- [format %x [peek $pc]] {
+		10 {
+			;# djnz index
+			mark_JP_c [peek $p1]
 		}
-		cc { markcode [peek16 $p1] }
-		cd { markcode [peek16 $p1] }
-		d4 { markcode [peek16 $p1] }
-		dc { markcode [peek16 $p1] }
-		e4 { markcode [peek16 $p1] }
-		e9 { markcode $hl }
-		ec { markcode [peek16 $p1] }
-		ed {
-			switch -- [format %02x [peek $p1]] {
-				4b { markdata [peek16 $p2] }
-				5b { markdata [peek16 $p2] }
-				6b { markdata [peek16 $p2] }
-				7b { markdata [peek16 $p2] }
-				a1 { markdata $hl }
-				a9 { markdata $hl }
-				b1 { markdata $hl }
-				b9 { markdata $hl }
-				a0 { markdata $hl $de }
-				a8 { markdata $hl $de }
-				b0 { markdata $hl $de }
-				b8 { markdata $hl $de }
-			}
+		18 {
+			;# jr index
+			;# just one possible path
+			set a 0
 		}
-		dd { ;# operation with IX somewhere
-			switch -- [format %02x [peek $p1]] {
-				2a      { markdata [expr [peek16 $p2]] }
-				46      { markdata [expr $ix + [peek $p2]] }
-				4e      { markdata [expr $ix + [peek $p2]] }
-				56      { markdata [expr $ix + [peek $p2]] }
-				5e      { markdata [expr $ix + [peek $p2]] }
-				66      { markdata [expr $ix + [peek $p2]] }
-				6e      { markdata [expr $ix + [peek $p2]] }
-				7e      { markdata [expr $ix + [peek $p2]] }
-				e9      { markcode $ix }
-				default { markdata [expr $ix + [peek $p2]] }
-			}
+		20 {
+			;# jr nz, index
+			mark_JP_c [peek $p1]
 		}
-		f4 { markcode [peek16 $p1] }
-		fc { markcode [peek16 $p1] }
-		fd { ;# operation with IY somewhere
-			switch -- [peek $p1] {
-				2a      { markdata [peek16 $p2] }
-				46      { markdata [expr $iy + [peek $p2]] }
-				4e      { markdata [expr $iy + [peek $p2]] }
-				56      { markdata [expr $iy + [peek $p2]] }
-				5e      { markdata [expr $iy + [peek $p2]] }
-				66      { markdata [expr $iy + [peek $p2]] }
-				6e      { markdata [expr $iy + [peek $p2]] }
-				7e      { markdata [expr $iy + [peek $p2]] }
-				e9      { markcode $iy }
-				default { markdata [expr $iy + [peek $p2]] }
-			}
+		28 {
+			;# jr z, index
+			mark_JP_c [peek $p1]
+		}
+		30 {
+			;# jr nc, index
+			mark_JP_c [peek $p1]
+		}
+		38 {
+			;# jr c, index
+			mark_JP_c [peek $p1]
+		}
+		c4 {
+			;# call nz, address 
+			mark_CALL [peek16 $p1]
+		}
+		cc {
+			;# call z, address 
+			mark_CALL [peek16 $p1]
+		}
+		cd {
+			;# call address 
+			mark_CALL [peek16 $p1]
+		}
+		d4 {
+			;# call nc, address
+			mark_CALL [peek16 $p1]
+		}
+		dc {
+			;# call c, address
+			mark_CALL [peek16 $p1]
+		}
+		e4 {
+			;# call po, address
+			mark_CALL [peek16 $p1]
+		}
+		e9 {
+			;# jp (hl)
+			;# just one possible path
+			set a 0
+		}
+		ec {
+			;# call pe, address
+			mark_CALL [peek16 $p1]
+		}
+		f4 {
+			;# call p, address
+			mark_CALL [peek16 $p1]
+		}
+		fc {
+			;# call m, address
+			mark_CALL [peek16 $p1]
 		}
 	}
+}
+
+proc codeanalyzer_dump {{filename "./source.asm"}} {
+	variable m
+	set source_file [open $filename {WRONLY TRUNC CREAT}]
+	;#set type [array get m $addr]
+	set size 1
+	for {set offset 0x0000} {$offset < 0xffff} {incr offset $size} {
+		set addr [fulladdr $offset]
+		if {[array get m $addr]} {
+			m($addr)
+		} else {
+			disasm $addr
+		}
+	}
+	foreach {addr type} [array get m] {
+		puts "[format %06x $addr] - $type"
+	}
+	;#puts $source_file [binary format c16 $header]
 }
 
 namespace export codeanalyzer
