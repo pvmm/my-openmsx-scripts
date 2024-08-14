@@ -516,6 +516,13 @@ proc disasm {source_file addr blob} {
 	}
 }
 
+proc dump_blob {source_file start_addr blob} {
+	if {$blob ne ""} {
+		disasm $source_file $start_addr $blob
+	}
+	return ""
+}
+
 proc codeanalyzer_dump {{filename "./source.asm"}} {
 	variable t
 	variable entry_point
@@ -534,23 +541,16 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 				append blob [format %c [peek $addr {slotted memory}]]
 			} else {
 				;# end of blob
-				if {$blob ne ""} {
-					disasm $source_file $start_addr $blob
-					set blob ""
-				}
+				set blob [dump_blob $source_file $start_addr $blob]
 				puts -nonewline $source_file "[format %04x $offset] "
 				puts $source_file "db #[format %02x [peek $addr {slotted memory}]]"
 			}
 		} else {
-			if {$blob ne ""} {
-				disasm $source_file $start_addr $blob
-				set blob ""
-			}
+			set blob [dump_blob $source_file $start_addr $blob]
+			append blob [format %c [peek $addr {slotted memory}]]
 		}
 	}
-	if {$blob ne ""} {
-		disasm $source_file $start_addr $blob
-	}
+	dump_blob $source_file $start_addr $blob
 	close $source_file
 }
 
