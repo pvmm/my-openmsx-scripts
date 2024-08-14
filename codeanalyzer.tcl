@@ -21,8 +21,9 @@ namespace eval codeanalyzer {
 ;# * try to detect joystick port input;
 ;# * try to detect sound generation (PSG);
 
-variable m_type ""
-variable m ;# memory
+variable mem_type ""
+variable t ;# memory type array
+variable l ;# instruction length array
 variable pc
 variable slot
 variable segment
@@ -31,6 +32,12 @@ variable cond {}
 variable r_wp {}
 variable w_wp {}
 variable entry_point {}
+
+# bookkeeping
+variable oldpc {}
+variable inslen 0
+variable last_mem_read {}
+
 # info
 variable DATA_recs 0 ;# data records
 variable CODE_recs 0 ;# code records
@@ -46,7 +53,7 @@ set_help_proc codeanalyzer [namespace code codeanalyzer_help]
 proc codeanalyzer_help {args} {
 	if {[llength $args] == 1} {
 		return {The codeanalyzer script creates annotated source code from dynamically analyzing running programs.
-Recognized commands: start, stop, scancart, info, pixel
+Recognized commands: start, stop, info, pixel
 }
 	}
 	switch -- [lindex $args 1] {
@@ -59,10 +66,6 @@ Analyze code from specified slot (0..3) and subslot (0..3).
 		"stop"  { return {Stop script that analyzes code.
 
 Syntax: codeanalyzer stop
-}}
-		"scancart" { return {Search for cartridge ROM signature in specified slot/subslot.
-
-Syntax: codeanalyzer scancart
 }}
 		"info" { return {Print info about code analysis to console.
 
@@ -99,7 +102,6 @@ proc _codeanalyzer {args} {
 	switch -- [lindex $args 0] {
 		"start"    { return [codeanalyzer_start {*}$params] }
 		"stop"     { return [codeanalyzer_stop {*}$params] }
-		"scancart" { return [codeanalyzer_scancart {*}$params] }
 		"info"     { return [codeanalyzer_info {*}$params] }
 		"dump"     { return [codeanalyzer_dump {*}$params] }
 		default    { error "Unknown command \"[lindex $args 0]\"." }
@@ -125,8 +127,8 @@ proc subslot {{defaults {}}} {
 	return [lindex $slot 1]
 }
 
-;# Get full address in {slotted memory} format: [slot][subslot][64kb addr]
-proc fulladdr {addr} {
+;# Get complete address in {slotted memory} format: [slot][subslot][64kb addr]
+proc _compaddr {addr} {
 	variable slot
 	if {![info exists slot]} {
 		error "no slot defined"
@@ -134,8 +136,26 @@ proc fulladdr {addr} {
 	return [expr ([slot] << 18) | ([subslot 0] << 16) | $addr]
 }
 
+proc _get_selected_slot {page} {
+        set ps_reg [debug read "ioports" 0xA8]
+        set ps [expr {($ps_reg >> (2 * $page)) & 0x03}]
+        if {[machine_info "issubslotted" $ps]} {
+                set ss_reg [debug read "slotted memory" [expr {0x40000 * $ps + 0xFFFF}]]
+                set ss [expr {(($ss_reg ^ 255) >> (2 * $page)) & 0x03}]
+        } else {
+                set ss 0
+        }
+        list $ps $ss
+}
+
+;# Get full address as used in {slotted memory} format: [slot][subslot][64KB addr]
+proc _fulladdr {addr} {
+	set curslot [_get_selected_slot [expr $addr >> 14]]
+	return [expr ([lindex $curslot 0] << 18) | ([lindex $curslot 1] << 16) | $addr]
+}
+
 proc reset_info {} {
-	variable m_type ""
+	variable mem_type ""
 	variable m
 	unset m
 	variable entry_point ""
@@ -145,10 +165,9 @@ proc reset_info {} {
 }
 
 proc codeanalyzer_start {args} {
-	variable m_type
+	variable mem_type
 	variable pc {}
 	variable entry_point
-	variable cond
 	variable r_wp
 	variable w_wp
 
@@ -171,13 +190,12 @@ proc codeanalyzer_start {args} {
 		reset_info
 	}
 	set slot $tmp
-	;# set condition according to slot and subslot
-	if {$cond eq ""} {
+	;# set breakpoints according to slot and subslot
+	if {$r_wp eq ""} {
 		puts "codeanalyzer started"
 		if {$entry_point eq ""} {
 			codeanalyzer_scancart
 		}
-		set cond [debug set_condition "\[pc_in_slot $slot\]"        codeanalyzer::_check_mem]
 		set r_wp [debug set_watchpoint read_mem  {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_read_mem ]
 		set w_wp [debug set_watchpoint write_mem {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_write_mem]
 	} else {
@@ -188,14 +206,12 @@ proc codeanalyzer_start {args} {
 }
 
 proc codeanalyzer_stop {} {
-	variable cond
 	variable r_wp
 	variable w_wp
-
-	if {$cond ne ""} {
+	if {$r_wp ne ""} {
 		puts "Codeanalyzer stopped."
-		debug remove_condition $cond
-		set cond ""
+		debug remove_watchpoint $r_wp
+		debug remove_watchpoint $w_wp
 		set r_wp ""
 		set w_wp ""
 	} else {
@@ -204,14 +220,14 @@ proc codeanalyzer_stop {} {
 }
 
 proc _scanmemtype {} {
-	variable m_type
-	set addr [fulladdr [reg PC]]
+	variable mem_type
+	set addr [_compaddr [reg PC]]
 	set byte [peek $addr {slotted memory}]
 	poke $addr [expr $byte ^ 1] {slotted memory}
 	if {[peek $addr {slotted memory}] eq $byte} {
-		set m_type ROM
+		set mem_type ROM
 	} else {
-		set m_type RAM
+		set mem_type RAM
 	}
 }
 
@@ -234,16 +250,16 @@ proc codeanalyzer_scancart {} {
 }
 
 proc _scancart {} {
-	variable m_type
+	variable mem_type
 	variable ss
 	variable slot
 	variable entry_point
 	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
-		set addr [fulladdr $offset]
+		set addr [_compaddr $offset]
 		set tmp [peek16 $addr {slotted memory}]
 		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
 		if {$prefix eq "AB"} {
-			set m_type ROM
+			set mem_type ROM
 			puts "prefix found at $ss:[format %04x [expr $addr & 0xffff]]"
 			set entry_point [peek16 [expr $addr + 2] {slotted memory}]
 			puts "entry point found at [format %04x $entry_point]"
@@ -262,17 +278,17 @@ proc codeanalyzer_info {} {
 		error "codeanalyzer was never executed."
 	}
 
-	variable m_type
+	variable mem_type
 	variable entry_point
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
-	variable cond
+	variable r_wp
 
 	puts "running on slot $ss"
 	puts -nonewline "memory type: "
-	if {$m_type ne ""} {
-		puts $m_type
+	if {$mem_type ne ""} {
+		puts $mem_type
 	} else {
 		puts "???"
 	}
@@ -287,7 +303,7 @@ proc codeanalyzer_info {} {
 	puts "number of BOTH records: $BOTH_recs"
 
 	puts -nonewline "codeanalyzer "
-	if {$cond ne ""} {
+	if {$r_wp ne ""} {
 		puts "still running"
 	} else {
 		puts "stopped"
@@ -309,24 +325,22 @@ proc env {varname {defaults {}}} {
 }
 
 proc mark_DATA {addr} {
-	variable m
-	variable slot
+	variable t
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
 
-	set addr [fulladdr $addr]
-	set type [array get m $addr]
-	log "D) type = $type, addr = [format %06x $addr]"
+	set addr [_compaddr $addr]
+	set type [array get t $addr]
 	if {$type eq [NAUGHT]} {
-		set m($addr) [DATA]
+		set t($addr) [DATA]
 		if {[env LOGLEVEL] eq 1} {
 			log "marking [format %04x [expr $addr & 0xffff]] as DATA"
 		}
 		incr DATA_recs
-	} elseif {$m($addr) eq [CODE]} {
+	} elseif {$t($addr) eq [CODE]} {
 		log "warning: overwritting address type in [format %04x [expr $addr & 0xffff]] from CODE to BOTH"
-		set m($addr) [BOTH]
+		set t($addr) [BOTH]
 		incr CODE_recs -1
 		incr BOTH_recs
 	}
@@ -352,42 +366,60 @@ proc mark_CALL {addr} {
 }
 
 proc mark_CODE {addr} {
-	variable m
+	variable t
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
 
-	set type [array get m $addr]
-	set addr [fulladdr $addr]
-	log "C) type = $type, addr = [format %06x $addr]"
+	set addr [_compaddr $addr]
+	set type [array get t $addr]
 	if {$type eq [NAUGHT]} {
-		set m($addr) [CODE]
+		set t($addr) [CODE]
 		if {[env LOGLEVEL] eq 1} {
 			log "marking [format %04x [expr $addr & 0xffff]] as CODE"
 		}
 		incr CODE_recs
-	} elseif {$m($addr) eq [DATA]} {
+	} elseif {$t($addr) eq [DATA]} {
 		log "warning: overwritting address type in [format %04x [expr $addr & 0xffff]] from DATA to BOTH"
-		set m($addr) [BOTH]
+		set t($addr) [BOTH]
 		incr DATA_recs -1
 		incr BOTH_recs
 	}
 }
 
 proc _read_mem {} {
-	set a [fulladdr $::wp_last_address]
-	log "R) a = $a"
-	mark_DATA [fulladdr $::wp_last_address]
+        variable oldpc
+        variable inslen
+	variable last_mem_read
+
+        if {$oldpc eq [reg PC]} {
+        	;# if same instruction, count its length
+		if {[expr $oldpc + $inslen] eq $::wp_last_address} {
+			mark_CODE [_fulladdr [expr [reg PC] + $inslen]]
+		} else {
+			set last_mem_read $::wp_last_address
+		}
+                incr inslen
+        } else {
+		;# last memory operation on oldpc is the actual read
+		if {$last_mem_read ne {}} {
+			mark_DATA [_fulladdr $last_mem_read]
+			set last_mem_read {}
+			;#checkop $oldpc
+		}
+                ;# start new instruction
+                mark_CODE [reg PC]
+                set oldpc [reg PC]
+		set inslen 1
+	}
 }
 
 proc _write_mem {} {
-	set a [fulladdr $::wp_last_address]
-	set b [$::wp_last_value]
-	log "W) ab = $a, $b"
-	mark_DATA [fulladdr $::wp_last_address]
+	mark_DATA [_fulladdr $::wp_last_address]
 }
 
 proc _check_mem {} {
+	log "_check_mem called at PC=[format %04x [reg PC]]"
 	variable m
 	variable pc [reg PC]
 	variable hl [reg HL]
@@ -473,23 +505,51 @@ proc _check_mem {} {
 	}
 }
 
+proc disasm {source_file addr blob} {
+	while {[string length $blob] > 0} {
+		set tmp  [debug disasm_blob $blob $addr]
+		set blob [string range $blob [lindex $tmp 1] end]
+		puts $source_file "[format %04x $addr] [lindex $tmp 0]"
+		incr addr [lindex $tmp 1]
+	}
+}
+
 proc codeanalyzer_dump {{filename "./source.asm"}} {
-	variable m
+	variable t
+	variable entry_point
 	set source_file [open $filename {WRONLY TRUNC CREAT}]
-	;#set type [array get m $addr]
-	set size 1
-	for {set offset 0x0000} {$offset < 0xffff} {incr offset $size} {
-		set addr [fulladdr $offset]
-		if {[array get m $addr]} {
-			m($addr)
+	set blob ""
+	set start_addr ""
+
+	for {set offset $entry_point} {$offset < [expr $entry_point + 0x20]} {incr offset} {
+		set addr [_compaddr $offset]
+		if {[array get t $addr] ne {}} {
+			set type $t($addr)
+			if {$type eq [CODE]} {
+				if {$blob eq ""} {
+					set start_addr $offset
+				}
+				append blob [format %c [peek $addr {slotted memory}]]
+			} else {
+				;# end of blob
+				if {$blob ne ""} {
+					disasm $source_file $start_addr $blob
+					set blob ""
+				}
+				puts -nonewline $source_file "[format %04x $offset] "
+				puts $source_file "db #[format %02x [peek $addr {slotted memory}]]"
+			}
 		} else {
-			disasm $addr
+			if {$blob ne ""} {
+				disasm $source_file $start_addr $blob
+				set blob ""
+			}
 		}
 	}
-	foreach {addr type} [array get m] {
-		puts "[format %06x $addr] - $type"
+	if {$blob ne ""} {
+		disasm $source_file $start_addr $blob
 	}
-	;#puts $source_file [binary format c16 $header]
+	close $source_file
 }
 
 namespace export codeanalyzer
