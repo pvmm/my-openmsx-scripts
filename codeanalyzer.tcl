@@ -5,6 +5,7 @@ namespace eval codeanalyzer {
 ;#   ** INI,IND,INIR,INDR,OUTI,OUTIR,OUTD,OUTDR
 ;#   ** explore conditional branches (specially when they fall through)
 ;# * BIOS support;
+;# * detect ROM size (16k, 32k or MEGAROM);
 ;# * detect segment type and usage when executing code or reading/writing data;
 ;# * detect code copying to RAM and include it in the analysis;
 ;# * detect code size using disassembler;
@@ -34,6 +35,7 @@ variable cond {}
 variable r_wp {}
 variable w_wp {}
 variable entry_point {}
+variable end_point 0xBFFF ;# end of page 2
 
 # bookkeeping
 variable oldpc {}
@@ -526,11 +528,12 @@ proc dump_blob {source_file start_addr blob} {
 proc codeanalyzer_dump {{filename "./source.asm"}} {
 	variable t
 	variable entry_point
+	variable end_point
 	set source_file [open $filename {WRONLY TRUNC CREAT}]
 	set blob ""
 	set start_addr ""
 
-	for {set offset $entry_point} {$offset < [expr $entry_point + 0x20]} {incr offset} {
+	for {set offset $entry_point} {$offset < $end_point} {incr offset} {
 		set addr [_compaddr $offset]
 		if {[array get t $addr] ne {}} {
 			set type $t($addr)
@@ -547,7 +550,8 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 			}
 		} else {
 			set blob [dump_blob $source_file $start_addr $blob]
-			append blob [format %c [peek $addr {slotted memory}]]
+			puts -nonewline $source_file "[format %04x $offset] "
+			puts $source_file "db #[format %02x [peek $addr {slotted memory}]]"
 		}
 	}
 	dump_blob $source_file $start_addr $blob
