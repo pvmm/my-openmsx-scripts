@@ -3,11 +3,13 @@ namespace eval codeanalyzer {
 ;# TODO:
 ;# * finish all z80 instructions;
 ;#   ** INI,IND,INIR,INDR,OUTI,OUTIR,OUTD,OUTDR
-;#   ** explore conditional branches (specially when it falls through)
+;#   ** explore conditional branches (specially when they fall through)
 ;# * BIOS support;
+;# * detect segment type and usage when executing code or reading/writing data;
+;# * detect code copying to RAM and include it in the analysis;
 ;# * detect code size using disassembler;
 ;# * write assembly output to file;
-;# * annotate unscanned code when writing output file;
+;# * annotate unscanned code/data when writing output file;
 ;# * allow user to set markers on the code;
 ;# * try to detect functions;
 ;#   ** detect call/ret combinations;
