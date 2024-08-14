@@ -67,7 +67,7 @@ Syntax: codeanalyzer start <slot> [<subslot>]
 
 Analyze code from specified slot (0..3) and subslot (0..3).
 }}
-		"stop"  { return {Stop script that analyzes code.
+		"stop" { return {Stop script that analyzes code.
 
 Syntax: codeanalyzer stop
 }}
@@ -132,7 +132,7 @@ proc subslot {{defaults {}}} {
 }
 
 ;# Get complete address in {slotted memory} format: [slot][subslot][64kb addr]
-proc _compaddr {addr} {
+proc _compladdr {addr} {
 	variable slot
 	if {![info exists slot]} {
 		error "no slot defined"
@@ -225,7 +225,7 @@ proc codeanalyzer_stop {} {
 
 proc _scanmemtype {} {
 	variable mem_type
-	set addr [_compaddr [reg PC]]
+	set addr [_compladdr [reg PC]]
 	set byte [peek $addr {slotted memory}]
 	poke $addr [expr $byte ^ 1] {slotted memory}
 	if {[peek $addr {slotted memory}] eq $byte} {
@@ -259,7 +259,7 @@ proc _scancart {} {
 	variable slot
 	variable entry_point
 	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
-		set addr [_compaddr $offset]
+		set addr [_compladdr $offset]
 		set tmp [peek16 $addr {slotted memory}]
 		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
 		if {$prefix eq "AB"} {
@@ -328,18 +328,18 @@ proc env {varname {defaults {}}} {
 	return $defaults;
 }
 
-proc mark_DATA {addr} {
+proc tag_DATA {addr} {
 	variable t
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
 
-	set addr [_compaddr $addr]
+	set addr [_compladdr $addr]
 	set type [array get t $addr]
 	if {$type eq [NAUGHT]} {
 		set t($addr) [DATA]
 		if {[env LOGLEVEL] eq 1} {
-			log "marking [format %04x [expr $addr & 0xffff]] as DATA"
+			log "tagging [format %04x [expr $addr & 0xffff]] as DATA"
 		}
 		incr DATA_recs
 	} elseif {$t($addr) eq [CODE]} {
@@ -350,37 +350,37 @@ proc mark_DATA {addr} {
 	}
 }
 
-proc mark_DATA_v {first args} {
+proc tag_DATA_v {first args} {
 	;# v is for variable args
-	mark_DATA $first
-	foreach addr $args { mark_DATA $addr }
+	tag_DATA $first
+	foreach addr $args { tag_DATA $addr }
 }
 
-proc mark_JP_c {index} {
+proc tag_JP_c {index} {
 	;# c is for conditional jump
-	;# mark all possible paths (branch or not)
-	mark_CODE [expr [reg PC] + $index]
-	mark_CODE [expr [reg PC] + 2]
+	;# tag all possible paths (branch or not)
+	tag_CODE [expr [reg PC] + $index]
+	tag_CODE [expr [reg PC] + 2]
 }
 
-proc mark_CALL {addr} {
-	;# mark all possible paths (branch and return)
-	mark_CODE $addr
-	mark_CODE [expr [reg PC] + 2]
+proc tag_CALL {addr} {
+	;# tag all possible paths (branch and return)
+	tag_CODE $addr
+	tag_CODE [expr [reg PC] + 2]
 }
 
-proc mark_CODE {addr} {
+proc tag_CODE {addr} {
 	variable t
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
 
-	set addr [_compaddr $addr]
+	set addr [_compladdr $addr]
 	set type [array get t $addr]
 	if {$type eq [NAUGHT]} {
 		set t($addr) [CODE]
 		if {[env LOGLEVEL] eq 1} {
-			log "marking [format %04x [expr $addr & 0xffff]] as CODE"
+			log "tagging [format %04x [expr $addr & 0xffff]] as CODE"
 		}
 		incr CODE_recs
 	} elseif {$t($addr) eq [DATA]} {
@@ -399,7 +399,7 @@ proc _read_mem {} {
         if {$oldpc eq [reg PC]} {
         	;# if same instruction, count its length
 		if {[expr $oldpc + $inslen] eq $::wp_last_address} {
-			mark_CODE [_fulladdr [expr [reg PC] + $inslen]]
+			tag_CODE [_fulladdr [expr [reg PC] + $inslen]]
 		} else {
 			set last_mem_read $::wp_last_address
 		}
@@ -407,19 +407,19 @@ proc _read_mem {} {
         } else {
 		;# last memory operation on oldpc is the actual read
 		if {$last_mem_read ne {}} {
-			mark_DATA [_fulladdr $last_mem_read]
+			tag_DATA [_fulladdr $last_mem_read]
 			set last_mem_read {}
 			;#checkop $oldpc
 		}
                 ;# start new instruction
-                mark_CODE [reg PC]
+                tag_CODE [reg PC]
                 set oldpc [reg PC]
 		set inslen 1
 	}
 }
 
 proc _write_mem {} {
-	mark_DATA [_fulladdr $::wp_last_address]
+	tag_DATA [_fulladdr $::wp_last_address]
 }
 
 proc _check_mem {} {
@@ -435,14 +435,14 @@ proc _check_mem {} {
 	variable p2 [expr $pc + 2]
 	variable p3 [expr $pc + 3]
 
-	;# mark PC address as CODE
-	mark_CODE $pc
+	;# tag PC address as CODE
+	tag_CODE $pc
 
-	;# mark instruction parameter as CODE
+	;# tag instruction parameter as CODE
 	switch -- [format %x [peek $pc]] {
 		10 {
 			;# djnz index
-			mark_JP_c [peek $p1]
+			tag_JP_c [peek $p1]
 		}
 		18 {
 			;# jr index
@@ -451,43 +451,43 @@ proc _check_mem {} {
 		}
 		20 {
 			;# jr nz, index
-			mark_JP_c [peek $p1]
+			tag_JP_c [peek $p1]
 		}
 		28 {
 			;# jr z, index
-			mark_JP_c [peek $p1]
+			tag_JP_c [peek $p1]
 		}
 		30 {
 			;# jr nc, index
-			mark_JP_c [peek $p1]
+			tag_JP_c [peek $p1]
 		}
 		38 {
 			;# jr c, index
-			mark_JP_c [peek $p1]
+			tag_JP_c [peek $p1]
 		}
 		c4 {
 			;# call nz, address 
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 		cc {
 			;# call z, address 
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 		cd {
 			;# call address 
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 		d4 {
 			;# call nc, address
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 		dc {
 			;# call c, address
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 		e4 {
 			;# call po, address
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 		e9 {
 			;# jp (hl)
@@ -496,15 +496,15 @@ proc _check_mem {} {
 		}
 		ec {
 			;# call pe, address
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 		f4 {
 			;# call p, address
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 		fc {
 			;# call m, address
-			mark_CALL [peek16 $p1]
+			tag_CALL [peek16 $p1]
 		}
 	}
 }
@@ -534,7 +534,7 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 	set start_addr ""
 
 	for {set offset $entry_point} {$offset < $end_point} {incr offset} {
-		set addr [_compaddr $offset]
+		set addr [_compladdr $offset]
 		if {[array get t $addr] ne {}} {
 			set type $t($addr)
 			if {$type eq [CODE]} {
