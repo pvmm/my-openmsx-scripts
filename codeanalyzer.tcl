@@ -26,7 +26,7 @@ namespace eval codeanalyzer {
 
 variable mem_type ""
 variable t ;# memory type array
-variable l ;# instruction length array
+variable l ;# label array
 variable pc
 variable slot
 variable segment
@@ -36,6 +36,7 @@ variable r_wp {}
 variable w_wp {}
 variable entry_point {}
 variable end_point 0xBFFF ;# end of page 2
+variable label ""
 
 # bookkeeping
 variable oldpc {}
@@ -83,6 +84,12 @@ Syntax: codeanalyzer pixel <x> <y>
 
 Syntax: codeanalyzer dump <filename>
 }}
+		"label" { return {Label running code with a comment.
+
+Syntax: codeanalyzer label -data
+
+Label the code as the program counter runs through it.
+}}
 		default { error "Unknown command \"[lindex $args 1]\"."
 }
 	}
@@ -108,6 +115,7 @@ proc _codeanalyzer {args} {
 		"stop"     { return [codeanalyzer_stop {*}$params] }
 		"info"     { return [codeanalyzer_info {*}$params] }
 		"dump"     { return [codeanalyzer_dump {*}$params] }
+		"label"    { return [codeanalyzer_label {*}$params] }
 		default    { error "Unknown command \"[lindex $args 0]\"." }
 	}
 }
@@ -371,6 +379,8 @@ proc tag_CALL {addr} {
 
 proc tag_CODE {addr} {
 	variable t
+	variable l
+	variable label
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
@@ -378,14 +388,16 @@ proc tag_CODE {addr} {
 	set addr [_compladdr $addr]
 	set type [array get t $addr]
 	if {$type eq [NAUGHT]} {
-		set t($addr) [CODE]
 		if {[env LOGLEVEL] eq 1} {
 			log "tagging [format %04x [expr $addr & 0xffff]] as CODE"
 		}
+		set t($addr) [CODE]
+		set l($addr) $label
 		incr CODE_recs
 	} elseif {$t($addr) eq [DATA]} {
 		log "warning: overwritting address type in [format %04x [expr $addr & 0xffff]] from DATA to BOTH"
 		set t($addr) [BOTH]
+		set l($addr) $label
 		incr DATA_recs -1
 		incr BOTH_recs
 	}
@@ -513,7 +525,11 @@ proc disasm {source_file addr blob} {
 	while {[string length $blob] > 0} {
 		set tmp  [debug disasm_blob $blob $addr]
 		set blob [string range $blob [lindex $tmp 1] end]
-		puts $source_file "[format %04x $addr] [lindex $tmp 0]"
+		if {$t($addr} eq ""} {
+			puts $source_file "[format %04x $addr] [lindex $tmp 0]"
+		} else {
+			puts $source_file "[format %04x $addr] [lindex $tmp 0] ; $t($addr)"
+		}
 		incr addr [lindex $tmp 1]
 	}
 }
@@ -523,6 +539,12 @@ proc dump_blob {source_file start_addr blob} {
 		disasm $source_file $start_addr $blob
 	}
 	return ""
+}
+
+proc codeanalyzer_label {message} {
+	variable l
+	variable label
+	set label $message
 }
 
 proc codeanalyzer_dump {{filename "./source.asm"}} {
