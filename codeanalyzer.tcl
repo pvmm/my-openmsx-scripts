@@ -392,14 +392,20 @@ proc tag_CODE {addr} {
 			log "tagging [format %04x [expr $addr & 0xffff]] as CODE"
 		}
 		set t($addr) [CODE]
-		set l($addr) $label
 		incr CODE_recs
 	} elseif {$t($addr) eq [DATA]} {
 		log "warning: overwritting address type in [format %04x [expr $addr & 0xffff]] from DATA to BOTH"
 		set t($addr) [BOTH]
-		set l($addr) $label
 		incr DATA_recs -1
 		incr BOTH_recs
+	}
+}
+
+proc tag_MSG {addr label} {
+	variable l
+	if {$label ne ""} {
+		puts "[format %04x $addr] $label"
+		set l($addr) $label
 	}
 }
 
@@ -407,27 +413,23 @@ proc _read_mem {} {
         variable oldpc
         variable inslen
 	variable last_mem_read
+	variable label
 
         if {$oldpc eq [reg PC]} {
-        	;# if same instruction, count its length
-		if {[expr $oldpc + $inslen] eq $::wp_last_address} {
-			tag_CODE [_fulladdr [expr [reg PC] + $inslen]]
-		} else {
-			set last_mem_read $::wp_last_address
+		set fullpc [_fulladdr [reg PC]]
+		tag_MSG $fullpc $label
+		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
+			tag_CODE [_fulladdr $::wp_last_address]
+		} elseif {$::wp_last_address ne [expr [reg PC]]} {
+			;# void infinite loop to PC
+			tag_DATA [_fulladdr $::wp_last_address]
 		}
-                incr inslen
-        } else {
-		;# last memory operation on oldpc is the actual read
-		if {$last_mem_read ne {}} {
-			tag_DATA [_fulladdr $last_mem_read]
-			set last_mem_read {}
-			;#checkop $oldpc
-		}
+	} else {
                 ;# start new instruction
-                tag_CODE [reg PC]
-                set oldpc [reg PC]
-		set inslen 1
+                tag_CODE [_fulladdr [reg PC]]
 	}
+	set oldpc [reg PC]
+	set last_mem_read $::wp_last_address
 }
 
 proc _write_mem {} {
@@ -522,15 +524,17 @@ proc _check_mem {} {
 }
 
 proc disasm {source_file addr blob} {
+	variable l
 	while {[string length $blob] > 0} {
-		set tmp  [debug disasm_blob $blob $addr]
-		set blob [string range $blob [lindex $tmp 1] end]
-		if {$t($addr} eq ""} {
-			puts $source_file "[format %04x $addr] [lindex $tmp 0]"
+		set asm  [debug disasm_blob $blob $addr]
+		set blob [string range $blob [lindex $asm 1] end]
+		set lbl  [array get l $addr]
+		if {$lbl eq ""} {
+			puts $source_file "[format %04x $addr] [lindex $asm 0]"
 		} else {
-			puts $source_file "[format %04x $addr] [lindex $tmp 0] ; $t($addr)"
+			puts $source_file "[format %04x $addr] [lindex $asm 0] ; [lindex $lbl 1]"
 		}
-		incr addr [lindex $tmp 1]
+		incr addr [lindex $asm 1]
 	}
 }
 
@@ -542,7 +546,7 @@ proc dump_blob {source_file start_addr blob} {
 }
 
 proc codeanalyzer_label {message} {
-	variable l
+	puts "label called with $message."
 	variable label
 	set label $message
 }
@@ -561,22 +565,24 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 			set type $t($addr)
 			if {$type eq [CODE]} {
 				if {$blob eq ""} {
-					set start_addr $offset
+					set start_addr $addr
 				}
 				append blob [format %c [peek $addr {slotted memory}]]
 			} else {
 				;# end of blob
 				set blob [dump_blob $source_file $start_addr $blob]
-				puts -nonewline $source_file "[format %04x $offset] "
+				puts -nonewline $source_file "[format %04x $addr] "
 				puts $source_file "db #[format %02x [peek $addr {slotted memory}]]"
 			}
 		} else {
 			set blob [dump_blob $source_file $start_addr $blob]
-			puts -nonewline $source_file "[format %04x $offset] "
+			puts -nonewline $source_file "[format %04x $addr] "
 			puts $source_file "db #[format %02x [peek $addr {slotted memory}]]"
 		}
 	}
-	dump_blob $source_file $start_addr $blob
+	if {$blob ne ""} {
+		dump_blob $source_file $start_addr $blob
+	}
 	close $source_file
 }
 
