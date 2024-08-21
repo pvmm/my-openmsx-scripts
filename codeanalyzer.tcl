@@ -436,93 +436,6 @@ proc _write_mem {} {
 	tag_DATA [_fulladdr $::wp_last_address]
 }
 
-proc _check_mem {} {
-	log "_check_mem called at PC=[format %04x [reg PC]]"
-	variable m
-	variable pc [reg PC]
-	variable hl [reg HL]
-	variable bc [reg BC]
-	variable de [reg DE]
-	variable ix [reg IX]
-	variable iy [reg IY]
-	variable p1 [expr $pc + 1]
-	variable p2 [expr $pc + 2]
-	variable p3 [expr $pc + 3]
-
-	;# tag PC address as CODE
-	tag_CODE $pc
-
-	;# tag instruction parameter as CODE
-	switch -- [format %x [peek $pc]] {
-		10 {
-			;# djnz index
-			tag_JP_c [peek $p1]
-		}
-		18 {
-			;# jr index
-			;# just one possible path
-			set a 0
-		}
-		20 {
-			;# jr nz, index
-			tag_JP_c [peek $p1]
-		}
-		28 {
-			;# jr z, index
-			tag_JP_c [peek $p1]
-		}
-		30 {
-			;# jr nc, index
-			tag_JP_c [peek $p1]
-		}
-		38 {
-			;# jr c, index
-			tag_JP_c [peek $p1]
-		}
-		c4 {
-			;# call nz, address 
-			tag_CALL [peek16 $p1]
-		}
-		cc {
-			;# call z, address 
-			tag_CALL [peek16 $p1]
-		}
-		cd {
-			;# call address 
-			tag_CALL [peek16 $p1]
-		}
-		d4 {
-			;# call nc, address
-			tag_CALL [peek16 $p1]
-		}
-		dc {
-			;# call c, address
-			tag_CALL [peek16 $p1]
-		}
-		e4 {
-			;# call po, address
-			tag_CALL [peek16 $p1]
-		}
-		e9 {
-			;# jp (hl)
-			;# just one possible path
-			set a 0
-		}
-		ec {
-			;# call pe, address
-			tag_CALL [peek16 $p1]
-		}
-		f4 {
-			;# call p, address
-			tag_CALL [peek16 $p1]
-		}
-		fc {
-			;# call m, address
-			tag_CALL [peek16 $p1]
-		}
-	}
-}
-
 proc disasm {source_file addr blob} {
 	variable l
 	while {[string length $blob] > 0} {
@@ -530,7 +443,10 @@ proc disasm {source_file addr blob} {
 		set blob [string range $blob [lindex $asm 1] end]
 		set lbl  [array get l $addr]
 		if {$lbl eq ""} {
-			puts $source_file "[format %04x $addr] [lindex $asm 0]"
+			;# replace address with label
+			set line "[format %04x $addr] [lindex $asm 0]"
+			puts $source_file [string replace $line]
+
 		} else {
 			puts $source_file "[format %04x $addr] [lindex $asm 0] ; [lindex $lbl 1]"
 		}
