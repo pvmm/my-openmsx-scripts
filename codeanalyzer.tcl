@@ -27,16 +27,20 @@ namespace eval codeanalyzer {
 variable mem_type ""
 variable t ;# memory type array
 variable l ;# label array
+variable c ;# comment array
 variable pc
 variable slot
 variable segment
 variable ss ""
+variable is_mapper 0
 variable cond {}
 variable r_wp {}
 variable w_wp {}
 variable entry_point {}
 variable end_point 0xBFFF ;# end of page 2
-variable label ""
+variable comment "" ;# stored comment message
+variable rr 0 ;# Real Read
+variable labelsize 14
 
 # bookkeeping
 variable oldpc {}
@@ -84,11 +88,11 @@ Syntax: codeanalyzer pixel <x> <y>
 
 Syntax: codeanalyzer dump <filename>
 }}
-		"label" { return {Label running code with a comment.
+		"comment" { return {Comment on running code.
 
-Syntax: codeanalyzer label -data
+Syntax: codeanalyzer comment -data
 
-Label the code as the program counter runs through it.
+Comment on the code as the program counter runs through it.
 }}
 		default { error "Unknown command \"[lindex $args 1]\"."
 }
@@ -115,7 +119,7 @@ proc _codeanalyzer {args} {
 		"stop"     { return [codeanalyzer_stop {*}$params] }
 		"info"     { return [codeanalyzer_info {*}$params] }
 		"dump"     { return [codeanalyzer_dump {*}$params] }
-		"label"    { return [codeanalyzer_label {*}$params] }
+		"comment"  { return [codeanalyzer_comment {*}$params] }
 		default    { error "Unknown command \"[lindex $args 0]\"." }
 	}
 }
@@ -182,6 +186,7 @@ proc codeanalyzer_start {args} {
 	variable entry_point
 	variable r_wp
 	variable w_wp
+	variable is_mapper
 
 	if {$args eq {} || [llength $args] > 2} {
 		error "wrong # args: should be slot ?subslot?"
@@ -202,6 +207,7 @@ proc codeanalyzer_start {args} {
 		reset_info
 	}
 	set slot $tmp
+	set is_mapper [expr [get_mapper_size {*}[lrange [expr "{$slot 0}"] 0 2]] != 0]
 	;# set breakpoints according to slot and subslot
 	if {$r_wp eq ""} {
 		puts "codeanalyzer started"
@@ -231,15 +237,25 @@ proc codeanalyzer_stop {} {
 	}
 }
 
-proc _scanmemtype {} {
+proc _scancart {} {
 	variable mem_type
-	set addr [_compladdr [reg PC]]
-	set byte [peek $addr {slotted memory}]
-	poke $addr [expr $byte ^ 1] {slotted memory}
-	if {[peek $addr {slotted memory}] eq $byte} {
-		set mem_type ROM
-	} else {
-		set mem_type RAM
+	variable ss
+	variable slot
+	variable entry_point
+	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
+		set addr [_compladdr $offset]
+		set tmp [peek16 $addr {slotted memory}]
+		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
+		if {$prefix eq "AB"} {
+			set mem_type ROM
+			puts "prefix found at $ss:[format %04x [expr $addr & 0xffff]]"
+			set entry_point [peek16 [expr $addr + 2] {slotted memory}]
+			puts "entry point found at [format %04x $entry_point]"
+		}
+	}
+	if {$entry_point eq ""} {
+		puts "no cartridge signature found"
+		set entry_point ""
 	}
 }
 
@@ -261,29 +277,6 @@ proc codeanalyzer_scancart {} {
 	_scancart
 }
 
-proc _scancart {} {
-	variable mem_type
-	variable ss
-	variable slot
-	variable entry_point
-	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
-		set addr [_compladdr $offset]
-		set tmp [peek16 $addr {slotted memory}]
-		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
-		if {$prefix eq "AB"} {
-			set mem_type ROM
-			puts "prefix found at $ss:[format %04x [expr $addr & 0xffff]]"
-			set entry_point [peek16 [expr $addr + 2] {slotted memory}]
-			puts "entry point found at [format %04x $entry_point]"
-		}
-	}
-	if {$entry_point eq ""} {
-		puts "no cartridge signature found"
-		set entry_point ""
-		debug set_condition "\[pc_in_slot $slot\]" -once codeanalyzer::_scanmemtype
-	}
-}
-
 proc codeanalyzer_info {} {
 	variable ss
 	if {$ss eq ""} {
@@ -291,6 +284,7 @@ proc codeanalyzer_info {} {
 	}
 
 	variable mem_type
+	variable is_mapper
 	variable entry_point
 	variable DATA_recs
 	variable CODE_recs
@@ -298,6 +292,7 @@ proc codeanalyzer_info {} {
 	variable r_wp
 
 	puts "running on slot $ss"
+	puts "mapper detection: [expr $is_mapper == 0 ? no : yes]"
 	puts -nonewline "memory type: "
 	if {$mem_type ne ""} {
 		puts $mem_type
@@ -380,7 +375,7 @@ proc tag_CALL {addr} {
 proc tag_CODE {addr} {
 	variable t
 	variable l
-	variable label
+	variable comment
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
@@ -401,11 +396,27 @@ proc tag_CODE {addr} {
 	}
 }
 
-proc tag_MSG {addr label} {
+proc tag_CMT {addr comment} {
+}
+
+proc labelfy {addr} {
+	return "L_[format %04X [expr $addr & 0xffff]]"
+}
+
+proc tag_address {addr} {
 	variable l
-	if {$label ne ""} {
-		puts "[format %04x $addr] $label"
-		set l($addr) $label
+	set tmp [array get l $addr]
+	set syms [debug symbols lookup -value [expr 0xffff & $addr]]
+	if {[llength $tmp] eq 0} {
+		if {[llength $syms] > 0} {
+			set sym [lindex $syms 0]
+			set name [lindex $sym 3]
+			log "found symbol $name in [format %04x $addr]"
+			set l($addr) $name
+		} elseif {$tmp eq [NAUGHT]} {
+			set name [labelfy $addr]
+			set l($addr) $name
+		}
 	}
 }
 
@@ -413,20 +424,27 @@ proc _read_mem {} {
         variable oldpc
         variable inslen
 	variable last_mem_read
-	variable label
+	variable comment
+	variable rr
 
+	set fullpc [_fulladdr [reg PC]]
         if {$oldpc eq [reg PC]} {
-		set fullpc [_fulladdr [reg PC]]
-		tag_MSG $fullpc $label
+		tag_CMT $fullpc $comment
 		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
 			tag_CODE [_fulladdr $::wp_last_address]
+			set rr 0
 		} elseif {$::wp_last_address ne [expr [reg PC]]} {
-			;# void infinite loop to PC
+			# void infinite loop to PC
 			tag_DATA [_fulladdr $::wp_last_address]
+			set rr 1
 		}
 	} else {
-                ;# start new instruction
+                # start new instruction
                 tag_CODE [_fulladdr [reg PC]]
+		# detect branch and set label
+		if {$::wp_last_address ne [expr $last_mem_read + 1] && $rr eq 0} {
+			tag_address $fullpc
+		}
 	}
 	set oldpc [reg PC]
 	set last_mem_read $::wp_last_address
@@ -436,22 +454,48 @@ proc _write_mem {} {
 	tag_DATA [_fulladdr $::wp_last_address]
 }
 
-proc disasm {source_file addr blob} {
+proc label_fmt {label} {
+	variable labelsize
+	if {$label ne ""} { set label "$label:" }
+	set size [expr $labelsize - [string len $label]]
+	if {$size > 0} {
+		return $label[string repeat " " $size]
+	}
+	return "$label\n[string repeat " " $labelsize]"
+}
+
+proc disasm_fmt {label asm comment} {
+	if {$comment eq ""} {
+		set suffix $asm
+	} else {
+		set suffix "[format %20s $asm] ; $comment"
+	}
+	return [label_fmt $label]$suffix
+}
+
+proc disasm {source_file addr blob {byte {}}} {
 	variable l
+	variable c
+
 	while {[string length $blob] > 0} {
-		set asm  [debug disasm_blob $blob $addr]
+		if {$byte eq {}} {
+			set asm [debug disasm_blob $blob $addr]
+		} else {
+			set asm [list "db     #[format %02x $byte]" 1]
+		}
 		set blob [string range $blob [lindex $asm 1] end]
 		set lbl  [array get l $addr]
-		if {$lbl eq ""} {
-			;# replace address with label
-			set line "[format %04x $addr] [lindex $asm 0]"
-			puts $source_file [string replace $line]
+		set cmt  [array get c $addr]
 
-		} else {
-			puts $source_file "[format %04x $addr] [lindex $asm 0] ; [lindex $lbl 1]"
-		}
+		if {$lbl ne {}} { set lbl $l($addr) }
+		if {$cmt ne {}} { set cmt $c($addr) }
+		puts $source_file [disasm_fmt $lbl [lindex $asm 0] $cmt]
 		incr addr [lindex $asm 1]
 	}
+}
+
+proc dump_mem {source_file addr} {
+	disasm $source_file $addr "\0" [peek $addr {slotted memory}]
 }
 
 proc dump_blob {source_file start_addr blob} {
@@ -461,10 +505,10 @@ proc dump_blob {source_file start_addr blob} {
 	return ""
 }
 
-proc codeanalyzer_label {message} {
-	puts "label called with $message."
-	variable label
-	set label $message
+proc codeanalyzer_comment {message} {
+	puts "comment called with comment \"$message\"."
+	variable comment
+	set comment $message
 }
 
 proc codeanalyzer_dump {{filename "./source.asm"}} {
@@ -485,15 +529,15 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 				}
 				append blob [format %c [peek $addr {slotted memory}]]
 			} else {
-				;# end of blob
-				set blob [dump_blob $source_file $start_addr $blob]
-				puts -nonewline $source_file "[format %04x $addr] "
-				puts $source_file "db #[format %02x [peek $addr {slotted memory}]]"
+				# end of blob
+				dump_blob $source_file $start_addr $blob
+				dump_mem $source_file $addr
+				set blob ""
 			}
 		} else {
-			set blob [dump_blob $source_file $start_addr $blob]
-			puts -nonewline $source_file "[format %04x $addr] "
-			puts $source_file "db #[format %02x [peek $addr {slotted memory}]]"
+			dump_blob $source_file $start_addr $blob
+			dump_mem $source_file $addr
+			set blob ""
 		}
 	}
 	if {$blob ne ""} {
