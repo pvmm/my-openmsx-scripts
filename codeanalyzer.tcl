@@ -3,7 +3,7 @@ namespace eval codeanalyzer {
 ;# TODO:
 ;# * finish all z80 instructions;
 ;#   ** INI,IND,INIR,INDR,OUTI,OUTIR,OUTD,OUTDR
-;#   ** explore conditional branches (specially when they fall through)
+;#   ** explore conditional branches (specially when the PC goes the other way)
 ;# * BIOS support;
 ;# * detect ROM size (16k, 32k or MEGAROM);
 ;# * detect segment type and usage when executing code or reading/writing data;
@@ -406,12 +406,13 @@ proc labelfy {addr} {
 proc tag_address {addr} {
 	variable l
 	set tmp [array get l $addr]
-	set syms [debug symbols lookup -value [expr 0xffff & $addr]]
 	if {[llength $tmp] eq 0} {
+		# look for symbol in symbol table
+		set syms [debug symbols lookup -value [expr 0xffff & $addr]]
 		if {[llength $syms] > 0} {
 			set sym [lindex $syms 0]
 			set name [lindex $sym 3]
-			log "found symbol $name in [format %04x $addr]"
+			log "found symbol $name in [format %06x $addr]"
 			set l($addr) $name
 		} elseif {$tmp eq [NAUGHT]} {
 			set name [labelfy $addr]
@@ -473,13 +474,22 @@ proc disasm_fmt {label asm comment} {
 	return [label_fmt $label]$suffix
 }
 
+proc lookup {addr} {
+	variable l
+	set tmp [array get l $addr]
+	if {[llength $tmp] ne 0} {
+		return [lindex $tmp 1]
+	}
+	return ""
+}
+
 proc disasm {source_file addr blob {byte {}}} {
 	variable l
 	variable c
 
 	while {[string length $blob] > 0} {
 		if {$byte eq {}} {
-			set asm [debug disasm_blob $blob $addr]
+			set asm [debug disasm_blob $blob $addr lookup]
 		} else {
 			set asm [list "db     #[format %02x $byte]" 1]
 		}
