@@ -6,20 +6,20 @@ namespace eval codeanalyzer {
 ;#   ** explore conditional branches (specially when the PC goes the other way)
 ;# * BIOS support;
 ;# * detect ROM size (16k, 32k or MEGAROM);
-;# * detect segment type and usage when executing code or reading/writing data;
+;# * detect segment type (ROM or memory mapper) and usage when executing code or reading/writing data;
 ;# * detect code copying to RAM and include it in the analysis;
-;# * detect code size using disassembler;
+;# * detect instructon size using disassembler;
 ;# * write assembly output to file;
 ;# * annotate unscanned code/data when writing output file;
 ;# * allow user to set markers on the code;
 ;# * try to detect functions;
-;#   ** detect call/ret combinations;
+;#   * detect call/ret combinations;
 ;# * try to detect all types of RAM-to-VRAM memory copying:
-;#   ** pattern generator table (PGT)
-;#   ** name table;
-;#   ** colour table;
-;#   ** sprite generator table;
-;#   ** sprite attribute table;
+;#   * pattern generator table (PGT)
+;#   * name table;
+;#   * colour table;
+;#   * sprite generator table;
+;#   * sprite attribute table;
 ;# * try to detect keyboard input;
 ;# * try to detect joystick port input;
 ;# * try to detect sound generation (PSG);
@@ -39,7 +39,7 @@ variable w_wp {}
 variable entry_point {}
 variable end_point 0xBFFF ;# end of page 2
 variable comment "" ;# stored comment message
-variable rr 0 ;# Real Read
+variable _rr 0 ;# (R)eal (R)ead
 variable labelsize 14
 
 # bookkeeping
@@ -149,7 +149,10 @@ proc _compladdr {addr} {
 	if {![info exists slot]} {
 		error "no slot defined"
 	}
-	return [expr ([slot] << 18) | ([subslot 0] << 16) | $addr]
+	if {![llength slot] > 1} {
+		return [expr ([slot] << 18) | ([subslot] << 16) | $addr]
+	}
+	return [expr ([slot] << 18) | $addr]
 }
 
 proc _get_selected_slot {page} {
@@ -403,6 +406,7 @@ proc labelfy {addr} {
 	return "L_[format %04X [expr $addr & 0xffff]]"
 }
 
+# Find label for address or create a new one in the format "L_"<hex address>
 proc tag_address {addr} {
 	variable l
 	set tmp [array get l $addr]
@@ -421,29 +425,34 @@ proc tag_address {addr} {
 	}
 }
 
+# Detect functions, BIOS calls etc.
+proc analyze_CODE {addr} { ;# addr starts the instruction
+}
+
 proc _read_mem {} {
         variable oldpc
         variable inslen
 	variable last_mem_read
 	variable comment
-	variable rr
+	variable _rr
 
 	set fullpc [_fulladdr [reg PC]]
         if {$oldpc eq [reg PC]} {
 		tag_CMT $fullpc $comment
 		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
 			tag_CODE [_fulladdr $::wp_last_address]
-			set rr 0
+			set _rr 0
 		} elseif {$::wp_last_address ne [expr [reg PC]]} {
-			# void infinite loop to PC
+			# avoid infinite loop to PC
 			tag_DATA [_fulladdr $::wp_last_address]
-			set rr 1
+			set _rr 1
 		}
 	} else {
+		analyze_CODE $oldpc
                 # start new instruction
                 tag_CODE [_fulladdr [reg PC]]
 		# detect branch and set label
-		if {$::wp_last_address ne [expr $last_mem_read + 1] && $rr eq 0} {
+		if {$::wp_last_address ne [expr $last_mem_read + 1] && $_rr eq 0} {
 			tag_address $fullpc
 		}
 	}
@@ -476,10 +485,13 @@ proc disasm_fmt {label asm comment} {
 
 proc lookup {addr} {
 	variable l
-	set tmp [array get l $addr]
-	if {[llength $tmp] ne 0} {
-		return [lindex $tmp 1]
+	log "Searching [format %04x $addr]..."
+	set lbl [array get l [_compladdr $addr]]
+	if {[llength $lbl] ne 0} {
+		log "Found @[format %04x $addr]: [lindex $lbl 1]"
+		return [lindex $lbl 1]
 	}
+	log [array get l]
 	return ""
 }
 
@@ -529,6 +541,9 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 	set blob ""
 	set start_addr ""
 
+	if {$entry_point eq {}} {
+		error "unknown program entry point"
+	}
 	for {set offset $entry_point} {$offset < $end_point} {incr offset} {
 		set addr [_compladdr $offset]
 		if {[array get t $addr] ne {}} {
