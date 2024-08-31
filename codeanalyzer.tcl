@@ -1,33 +1,34 @@
 namespace eval codeanalyzer {
 
-;# TODO:
-;# * finish all z80 instructions;
-;#   ** INI,IND,INIR,INDR,OUTI,OUTIR,OUTD,OUTDR
-;#   ** explore conditional branches (specially when the PC goes the other way)
-;# * BIOS support;
-;# * detect ROM size (16k, 32k or MEGAROM);
-;# * detect segment type (ROM or memory mapper) and usage when executing code or reading/writing data;
-;# * detect code copying to RAM and include it in the analysis;
-;# * detect instructon size using disassembler;
-;# * write assembly output to file;
-;# * annotate unscanned code/data when writing output file;
-;# * allow user to set markers on the code;
-;# * try to detect functions;
-;#   * detect call/ret combinations;
-;# * try to detect all types of RAM-to-VRAM memory copying:
-;#   * pattern generator table (PGT)
-;#   * name table;
-;#   * colour table;
-;#   * sprite generator table;
-;#   * sprite attribute table;
-;# * try to detect keyboard input;
-;# * try to detect joystick port input;
-;# * try to detect sound generation (PSG);
+# TODO:
+# * finish all z80 instructions;
+#   ** INI,IND,INIR,INDR,OUTI,OUTIR,OUTD,OUTDR
+#   ** explore conditional branches (specially when the PC goes the other way)
+# * BIOS support;
+# * detect ROM size (16k, 32k or MEGAROM);
+# * detect segment type (ROM or memory mapper) and usage when executing code or reading/writing data;
+# * detect code copying to RAM and include it in the analysis;
+# * detect instructon size using disassembler;
+# * write assembly output to file;
+# * annotate unscanned code/data when writing output file;
+# * allow user to set markers on the code;
+# * try to detect functions;
+#   * detect call/ret combinations;
+# * try to detect all types of RAM-to-VRAM memory copying:
+#   * pattern generator table (PGT)
+#   * name table;
+#   * colour table;
+#   * sprite generator table;
+#   * sprite attribute table;
+# * try to detect keyboard input;
+# * try to detect joystick port input;
+# * try to detect sound generation (PSG);
 
 variable mem_type ""
 variable t ;# memory type array
 variable l ;# label array
 variable c ;# comment array
+variable x ;# extended address
 variable pc
 variable slot
 variable segment
@@ -36,6 +37,7 @@ variable is_mapper 0
 variable cond {}
 variable r_wp {}
 variable w_wp {}
+variable start_point {}
 variable entry_point {}
 variable end_point 0xBFFF ;# end of page 2
 variable comment "" ;# stored comment message
@@ -52,7 +54,7 @@ variable DATA_recs 0 ;# data records
 variable CODE_recs 0 ;# code records
 variable BOTH_recs 0 ;# both DATA and CODE records
 
-;# constants
+# constants
 proc NAUGHT	{} { return {}}
 proc CODE	{} { return 1 }
 proc DATA	{} { return 2 }
@@ -143,7 +145,7 @@ proc subslot {{defaults {}}} {
 	return [lindex $slot 1]
 }
 
-;# Get complete address in {slotted memory} format: [slot][subslot][64kb addr]
+# Get complete address in {slotted memory} format: [slot][subslot][64kb addr]
 proc _compladdr {addr} {
 	variable slot
 	if {![info exists slot]} {
@@ -156,18 +158,18 @@ proc _compladdr {addr} {
 }
 
 proc _get_selected_slot {page} {
-        set ps_reg [debug read "ioports" 0xA8]
-        set ps [expr {($ps_reg >> (2 * $page)) & 0x03}]
-        if {[machine_info "issubslotted" $ps]} {
-                set ss_reg [debug read "slotted memory" [expr {0x40000 * $ps + 0xFFFF}]]
-                set ss [expr {(($ss_reg ^ 255) >> (2 * $page)) & 0x03}]
-        } else {
-                set ss 0
-        }
-        list $ps $ss
+	set ps_reg [debug read "ioports" 0xA8]
+	set ps [expr {($ps_reg >> (2 * $page)) & 0x03}]
+	if {[machine_info "issubslotted" $ps]} {
+		set ss_reg [debug read "slotted memory" [expr {0x40000 * $ps + 0xFFFF}]]
+		set ss [expr {(($ss_reg ^ 255) >> (2 * $page)) & 0x03}]
+	} else {
+		set ss 0
+	}
+	list $ps $ss
 }
 
-;# Get full address as used in {slotted memory} format: [slot][subslot][64KB addr]
+# Get full address as used in {slotted memory} format: [slot][subslot][64KB addr]
 proc _fulladdr {addr} {
 	set curslot [_get_selected_slot [expr $addr >> 14]]
 	return [expr ([lindex $curslot 0] << 18) | ([lindex $curslot 1] << 16) | $addr]
@@ -177,7 +179,8 @@ proc reset_info {} {
 	variable mem_type ""
 	variable m
 	unset m
-	variable entry_point ""
+	variable start_point {}
+	variable entry_point {}
 	variable DATA_recs 0
 	variable CODE_recs 0
 	variable BOTH_recs 0
@@ -186,6 +189,7 @@ proc reset_info {} {
 proc codeanalyzer_start {args} {
 	variable mem_type
 	variable pc {}
+	variable start_point
 	variable entry_point
 	variable r_wp
 	variable w_wp
@@ -244,6 +248,7 @@ proc _scancart {} {
 	variable mem_type
 	variable ss
 	variable slot
+	variable start_point
 	variable entry_point
 	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
 		set addr [_compladdr $offset]
@@ -252,12 +257,15 @@ proc _scancart {} {
 		if {$prefix eq "AB"} {
 			set mem_type ROM
 			puts "prefix found at $ss:[format %04x [expr $addr & 0xffff]]"
+			set start_point $offset
 			set entry_point [peek16 [expr $addr + 2] {slotted memory}]
+			puts "start point found at [format %04x $start_point]"
 			puts "entry point found at [format %04x $entry_point]"
 		}
 	}
-	if {$entry_point eq ""} {
+	if {$start_point eq ""} {
 		puts "no cartridge signature found"
+		set start_point ""
 		set entry_point ""
 	}
 }
@@ -288,6 +296,7 @@ proc codeanalyzer_info {} {
 
 	variable mem_type
 	variable is_mapper
+	variable start_point
 	variable entry_point
 	variable DATA_recs
 	variable CODE_recs
@@ -302,8 +311,14 @@ proc codeanalyzer_info {} {
 	} else {
 		puts "???"
 	}
+	puts -nonewline "start point: "
+	if {$start_point ne {}} {
+		puts [format %04x $start_point]
+	} else {
+		puts "undefined"
+	}
 	puts -nonewline "entry point: "
-	if {$entry_point ne ""} {
+	if {$entry_point ne {}} {
 		puts [format %04x $entry_point]
 	} else {
 		puts "undefined"
@@ -407,8 +422,12 @@ proc labelfy {addr} {
 }
 
 # Find label for address or create a new one in the format "L_"<hex address>
-proc tag_address {addr} {
+proc tag_address {addr {name {}}} {
 	variable l
+	if {$name ne {}} {
+		set l($addr) $name
+		return
+	}
 	set tmp [array get l $addr]
 	if {[llength $tmp] eq 0} {
 		# look for symbol in symbol table
@@ -427,17 +446,90 @@ proc tag_address {addr} {
 
 # Detect functions, BIOS calls etc.
 proc analyze_CODE {addr} { ;# addr starts the instruction
+	set idx  [peek [expr $addr + 1]]
+	set dest [_fulladdr [peek16 [expr $addr + 1]]]
+	set next [_fulladdr [expr $addr + 2]] ;# next instruction
+	set fulladdr [_fulladdr $addr]
+	switch [format %02x [peek $addr]] {
+		10 { ;# djnz index
+			set addr [expr $idx + $dest]
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		18 { ;# jr index
+			set addr [expr $idx + $dest]
+			set x($fulladdr) $dest
+		}
+		20 { ;# jr nz, index
+			set addr [expr $idx + $dest]
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		28 { ;# jr z, index
+			set addr [expr $idx + $dest]
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		30 { ;# jr nc, index
+			set addr [expr $idx + $dest]
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		38 { ;# jr c, index
+			set addr [expr $idx + $dest]
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		c4 { ;# call nz, address
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		cc { ;# call z, address
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		cd { ;# call address
+			set x($fulladdr) $dest
+		}
+		d4 { ;# call nc, address
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		dc { ;# call c, address
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		e4 { ;# call po, address
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		e9 { ;# jp (hl)
+			set x($fulladdr) [_fulladdr [peek16 [reg HL]]]
+		}
+		ec { ;# call pe, address
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		f4 { ;# call p, address
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+		fc { ;# call m, address
+			set x($fulladdr) $dest
+			tag_CODE $next
+		}
+	}
 }
 
 proc _read_mem {} {
-        variable oldpc
-        variable inslen
+	variable oldpc
+	variable inslen
 	variable last_mem_read
 	variable comment
 	variable _rr
 
 	set fullpc [_fulladdr [reg PC]]
-        if {$oldpc eq [reg PC]} {
+	if {$oldpc eq [reg PC]} {
 		tag_CMT $fullpc $comment
 		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
 			tag_CODE [_fulladdr $::wp_last_address]
@@ -448,9 +540,9 @@ proc _read_mem {} {
 			set _rr 1
 		}
 	} else {
-		analyze_CODE $oldpc
-                # start new instruction
-                tag_CODE [_fulladdr [reg PC]]
+		if {$oldpc ne {}} { analyze_CODE $oldpc }
+		# start new instruction
+		tag_CODE [_fulladdr [reg PC]]
 		# detect branch and set label
 		if {$::wp_last_address ne [expr $last_mem_read + 1] && $_rr eq 0} {
 			tag_address $fullpc
@@ -485,13 +577,12 @@ proc disasm_fmt {label asm comment} {
 
 proc lookup {addr} {
 	variable l
-	log "Searching [format %04x $addr]..."
+	log "searching [format %04x $addr]..."
 	set lbl [array get l [_compladdr $addr]]
 	if {[llength $lbl] ne 0} {
-		log "Found @[format %04x $addr]: [lindex $lbl 1]"
+		log "found @[format %04x $addr]: [lindex $lbl 1]"
 		return [lindex $lbl 1]
 	}
-	log [array get l]
 	return ""
 }
 
@@ -535,16 +626,19 @@ proc codeanalyzer_comment {message} {
 
 proc codeanalyzer_dump {{filename "./source.asm"}} {
 	variable t
+	variable start_point
 	variable entry_point
 	variable end_point
 	set source_file [open $filename {WRONLY TRUNC CREAT}]
 	set blob ""
-	set start_addr ""
+	set start_addr {}
 
-	if {$entry_point eq {}} {
+	if {$start_point eq {}} {
 		error "unknown program entry point"
 	}
-	for {set offset $entry_point} {$offset < $end_point} {incr offset} {
+	tag_address [_fulladdr $start_point] "START"
+	tag_address [_fulladdr $entry_point] "MAIN"
+	for {set offset $start_point} {$offset < $end_point} {incr offset} {
 		set addr [_compladdr $offset]
 		if {[array get t $addr] ne {}} {
 			set type $t($addr)
