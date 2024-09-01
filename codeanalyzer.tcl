@@ -25,11 +25,13 @@ namespace eval codeanalyzer {
 # * try to detect sound generation (PSG);
 
 variable mem_type ""
+
 variable t ;# memory type array
 variable l ;# label array
 variable c ;# comment array
 variable x ;# extended address
 variable pc
+variable tmp_pc {}
 variable slot
 variable segment
 variable ss ""
@@ -42,7 +44,7 @@ variable entry_point {}
 variable end_point 0xBFFF ;# end of page 2
 variable comment "" ;# stored comment message
 variable _rr 0 ;# (R)eal (R)ead
-variable labelsize 14
+variable label_size 14
 
 # bookkeeping
 variable oldpc {}
@@ -96,34 +98,42 @@ Syntax: codeanalyzer comment -data
 
 Comment on the code as the program counter runs through it.
 }}
+		"labelsize" { return {Return current label length or change its value. Default value: 14
+
+Syntax: codeanalyzer labelsize [<value>]
+
+Comment on the code as the program counter runs through it.
+}}
 		default { error "Unknown command \"[lindex $args 1]\"."
 }
 	}
 }
 
+proc codeanalyzer_dispatch {args} {
+	set params "[lrange $args 1 end]"
+	switch -- [lindex $args 0] {
+		"start"     { return [codeanalyzer_start {*}$params] }
+		"stop"      { return [codeanalyzer_stop {*}$params] }
+		"info"      { return [codeanalyzer_info {*}$params] }
+		"comment"   { return [codeanalyzer_comment {*}$params] }
+		"dump"      { return [codeanalyzer_dump {*}$params] }
+		"labelsize" { return [codeanalyzer_labelsize {*}$params] }
+		"memvars"   { return [codeanalyzer_memvars {*}$params] }
+		default     { error "Unknown command \"[lindex $args 0]\"." }
+	}
+}
+
 proc codeanalyzer {args} {
 	if {[env DEBUG] ne 0} {
-		if {[catch {_codeanalyzer {*}$args} fid]} {
+		if {[catch {codeanalyzer_dispatch {*}$args} fid]} {
 			debug break 
 			puts stderr $::errorInfo
 			error $::errorInfo
 		}
 	} else {
-		_codeanalyzer {*}$args
+		codeanalyzer_dispatch {*}$args
 	}
 	return
-}
-
-proc _codeanalyzer {args} {
-	set params "[lrange $args 1 end]"
-	switch -- [lindex $args 0] {
-		"start"    { return [codeanalyzer_start {*}$params] }
-		"stop"     { return [codeanalyzer_stop {*}$params] }
-		"info"     { return [codeanalyzer_info {*}$params] }
-		"dump"     { return [codeanalyzer_dump {*}$params] }
-		"comment"  { return [codeanalyzer_comment {*}$params] }
-		default    { error "Unknown command \"[lindex $args 0]\"." }
-	}
 }
 
 proc slot {} {
@@ -146,7 +156,7 @@ proc subslot {{defaults {}}} {
 }
 
 # Get complete address in {slotted memory} format: [slot][subslot][64kb addr]
-proc _compladdr {addr} {
+proc get_compaddr {addr} {
 	variable slot
 	if {![info exists slot]} {
 		error "no slot defined"
@@ -169,10 +179,13 @@ proc _get_selected_slot {page} {
 	list $ps $ss
 }
 
-# Get full address as used in {slotted memory} format: [slot][subslot][64KB addr]
-proc _fulladdr {addr} {
-	set curslot [_get_selected_slot [expr $addr >> 14]]
-	return [expr ([lindex $curslot 0] << 18) | ([lindex $curslot 1] << 16) | $addr]
+proc calc_addr {slot subslot addr} {
+	return [expr ($slot << 18) | ($subslot << 16) | $addr]
+}
+
+# Get current address as used in {slotted memory} format: [current slot][current subslot][64KB addr]
+proc get_curraddr {addr} {
+	return [calc_addr {*}[list {*}[_get_selected_slot [expr $addr >> 14]] $addr]]
 }
 
 proc reset_info {} {
@@ -218,6 +231,7 @@ proc codeanalyzer_start {args} {
 	;# set breakpoints according to slot and subslot
 	if {$r_wp eq ""} {
 		puts "codeanalyzer started"
+		load_bios
 		if {$entry_point eq ""} {
 			codeanalyzer_scancart
 		}
@@ -251,7 +265,7 @@ proc _scancart {} {
 	variable start_point
 	variable entry_point
 	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
-		set addr [_compladdr $offset]
+		set addr [get_compaddr $offset]
 		set tmp [peek16 $addr {slotted memory}]
 		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
 		if {$prefix eq "AB"} {
@@ -355,7 +369,7 @@ proc tag_DATA {addr} {
 	variable CODE_recs
 	variable BOTH_recs
 
-	set addr [_compladdr $addr]
+	set addr [get_compaddr $addr]
 	set type [array get t $addr]
 	if {$type eq [NAUGHT]} {
 		set t($addr) [DATA]
@@ -393,12 +407,11 @@ proc tag_CALL {addr} {
 proc tag_CODE {addr} {
 	variable t
 	variable l
-	variable comment
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
 
-	set addr [_compladdr $addr]
+	set addr [get_compaddr $addr]
 	set type [array get t $addr]
 	if {$type eq [NAUGHT]} {
 		if {[env LOGLEVEL] eq 1} {
@@ -415,6 +428,16 @@ proc tag_CODE {addr} {
 }
 
 proc tag_CMT {addr comment} {
+	variable c
+	set curcmt [array get c $addr]
+	if {[llength $curcmt] eq 0} {
+		set c($addr) $comment
+	} else {
+		if {[string first $comment $c($addr)] eq -1} {
+			log "append comment at $curcmt: $comment"
+			set c($addr) "[lindex $curcmt 1], $comment"
+		}
+	}
 }
 
 proc labelfy {addr} {
@@ -428,8 +451,8 @@ proc tag_address {addr {name {}}} {
 		set l($addr) $name
 		return
 	}
-	set tmp [array get l $addr]
-	if {[llength $tmp] eq 0} {
+	set lbl [array get l $addr]
+	if {[llength $lbl] eq 0} {
 		# look for symbol in symbol table
 		set syms [debug symbols lookup -value [expr 0xffff & $addr]]
 		if {[llength $syms] > 0} {
@@ -437,7 +460,7 @@ proc tag_address {addr {name {}}} {
 			set name [lindex $sym 3]
 			log "found symbol $name in [format %06x $addr]"
 			set l($addr) $name
-		} elseif {$tmp eq [NAUGHT]} {
+		} elseif {$lbl eq [NAUGHT]} {
 			set name [labelfy $addr]
 			set l($addr) $name
 		}
@@ -446,76 +469,81 @@ proc tag_address {addr {name {}}} {
 
 # Detect functions, BIOS calls etc.
 proc analyze_CODE {addr} { ;# addr starts the instruction
+	variable x
 	set idx  [peek [expr $addr + 1]]
-	set dest [_fulladdr [peek16 [expr $addr + 1]]]
-	set next [_fulladdr [expr $addr + 2]] ;# next instruction
-	set fulladdr [_fulladdr $addr]
+	set dest [get_curraddr [peek16 [expr $addr + 1]]]
+	set next [get_curraddr [expr $addr + 2]] ;# next instruction
+	set curraddr [get_curraddr $addr]
 	switch [format %02x [peek $addr]] {
 		10 { ;# djnz index
 			set addr [expr $idx + $dest]
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		18 { ;# jr index
 			set addr [expr $idx + $dest]
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 		}
 		20 { ;# jr nz, index
 			set addr [expr $idx + $dest]
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		28 { ;# jr z, index
 			set addr [expr $idx + $dest]
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		30 { ;# jr nc, index
 			set addr [expr $idx + $dest]
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		38 { ;# jr c, index
 			set addr [expr $idx + $dest]
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
+		3a { ;# ld a,(word)
+			set x($curraddr) $dest
+			tag_DATA $dest
+		}
 		c4 { ;# call nz, address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		cc { ;# call z, address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		cd { ;# call address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 		}
 		d4 { ;# call nc, address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		dc { ;# call c, address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		e4 { ;# call po, address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		e9 { ;# jp (hl)
-			set x($fulladdr) [_fulladdr [peek16 [reg HL]]]
+			set x($curraddr) [get_curraddr [peek16 [reg HL]]]
 		}
 		ec { ;# call pe, address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		f4 { ;# call p, address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 		fc { ;# call m, address
-			set x($fulladdr) $dest
+			set x($curraddr) $dest
 			tag_CODE $next
 		}
 	}
@@ -525,24 +553,25 @@ proc _read_mem {} {
 	variable oldpc
 	variable inslen
 	variable last_mem_read
-	variable comment
 	variable _rr
+	variable comment
 
-	set fullpc [_fulladdr [reg PC]]
+	set fullpc [get_curraddr [reg PC]]
 	if {$oldpc eq [reg PC]} {
-		tag_CMT $fullpc $comment
 		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
-			tag_CODE [_fulladdr $::wp_last_address]
+			tag_CODE [get_curraddr $::wp_last_address]
 			set _rr 0
 		} elseif {$::wp_last_address ne [expr [reg PC]]} {
 			# avoid infinite loop to PC
-			tag_DATA [_fulladdr $::wp_last_address]
+			tag_DATA [get_curraddr $::wp_last_address]
 			set _rr 1
 		}
 	} else {
 		if {$oldpc ne {}} { analyze_CODE $oldpc }
+		# put comment on new instruction if it exists
+		if {$comment ne {}} { tag_CMT $fullpc $comment }
 		# start new instruction
-		tag_CODE [_fulladdr [reg PC]]
+		tag_CODE [get_curraddr [reg PC]]
 		# detect branch and set label
 		if {$::wp_last_address ne [expr $last_mem_read + 1] && $_rr eq 0} {
 			tag_address $fullpc
@@ -553,17 +582,17 @@ proc _read_mem {} {
 }
 
 proc _write_mem {} {
-	tag_DATA [_fulladdr $::wp_last_address]
+	tag_DATA [get_curraddr $::wp_last_address]
 }
 
 proc label_fmt {label} {
-	variable labelsize
+	variable label_size
 	if {$label ne ""} { set label "$label:" }
-	set size [expr $labelsize - [string len $label]]
+	set size [expr $label_size - [string len $label]]
 	if {$size > 0} {
 		return $label[string repeat " " $size]
 	}
-	return "$label\n[string repeat " " $labelsize]"
+	return "$label\n[string repeat " " $label_size]"
 }
 
 proc disasm_fmt {label asm comment} {
@@ -577,8 +606,17 @@ proc disasm_fmt {label asm comment} {
 
 proc lookup {addr} {
 	variable l
+	variable x
+	variable tmp_pc
+
 	log "searching [format %04x $addr]..."
-	set lbl [array get l [_compladdr $addr]]
+	# search extended address information
+	if {[array get x $tmp_pc] ne {}} {
+		set addr $x($tmp_pc)
+	} else {
+		set addr [get_compaddr $addr]
+	}
+	set lbl [array get l $addr]
 	if {[llength $lbl] ne 0} {
 		log "found @[format %04x $addr]: [lindex $lbl 1]"
 		return [lindex $lbl 1]
@@ -589,9 +627,12 @@ proc lookup {addr} {
 proc disasm {source_file addr blob {byte {}}} {
 	variable l
 	variable c
+	variable tmp_pc
+	variable comment
 
 	while {[string length $blob] > 0} {
 		if {$byte eq {}} {
+			set tmp_pc $addr
 			set asm [debug disasm_blob $blob $addr lookup]
 		} else {
 			set asm [list "db     #[format %02x $byte]" 1]
@@ -636,10 +677,10 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 	if {$start_point eq {}} {
 		error "unknown program entry point"
 	}
-	tag_address [_fulladdr $start_point] "START"
-	tag_address [_fulladdr $entry_point] "MAIN"
+	tag_address [get_curraddr $start_point] "START"
+	tag_address [get_curraddr $entry_point] "MAIN"
 	for {set offset $start_point} {$offset < $end_point} {incr offset} {
-		set addr [_compladdr $offset]
+		set addr [get_compaddr $offset]
 		if {[array get t $addr] ne {}} {
 			set type $t($addr)
 			if {$type eq [CODE]} {
@@ -663,6 +704,25 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 		dump_blob $source_file $start_addr $blob
 	}
 	close $source_file
+}
+
+proc codeanalyzer_labelsize {{value {}}} {
+	variable label_size
+	if {$value eq {}} {
+		return $label_size
+	}
+	set label_size $value
+}
+
+proc codeanalyzer_memvars {args} {
+	variable mem_vars
+	puts [array get mem_vars {*}$args]
+}
+
+proc load_bios {} {
+	variable l
+	set l([calc_addr 0 0 0x0006]) vdp.dr
+	set l([calc_addr 0 0 0x0007]) vdp.dw
 }
 
 namespace export codeanalyzer
