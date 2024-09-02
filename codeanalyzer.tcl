@@ -118,7 +118,6 @@ proc codeanalyzer_dispatch {args} {
 		"comment"   { return [codeanalyzer_comment {*}$params] }
 		"dump"      { return [codeanalyzer_dump {*}$params] }
 		"labelsize" { return [codeanalyzer_labelsize {*}$params] }
-		"memvars"   { return [codeanalyzer_memvars {*}$params] }
 		default     { error "Unknown command \"[lindex $args 0]\"." }
 	}
 }
@@ -467,85 +466,36 @@ proc tag_address {addr {name {}}} {
 	}
 }
 
+proc disasm_blob {addr} {
+	set blob ""
+	set xaddr [get_curraddr $addr]
+	append blob [format %c [peek $xaddr {slotted memory}]]
+	append blob [format %c [peek [expr $xaddr + 1] {slotted memory}]]
+	append blob [format %c [peek [expr $xaddr + 2] {slotted memory}]]
+	append blob [format %c [peek [expr $xaddr + 3] {slotted memory}]]
+	return [debug disasm_blob $blob $addr]
+}
+
+proc decode {addr} {
+	set len [lindex [disasm_blob $addr] 1]
+	for {set i 0} {$i < $len} {incr i} {
+		tag_CODE [get_curraddr [expr $addr + $i]]
+	}
+}
+
 # Detect functions, BIOS calls etc.
-proc analyze_CODE {addr} { ;# addr starts the instruction
-	variable x
-	set idx  [peek [expr $addr + 1]]
-	set dest [get_curraddr [peek16 [expr $addr + 1]]]
-	set next [get_curraddr [expr $addr + 2]] ;# next instruction
-	set curraddr [get_curraddr $addr]
-	switch [format %02x [peek $addr]] {
-		10 { ;# djnz index
-			set addr [expr $idx + $dest]
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		18 { ;# jr index
-			set addr [expr $idx + $dest]
-			set x($curraddr) $dest
-		}
-		20 { ;# jr nz, index
-			set addr [expr $idx + $dest]
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		28 { ;# jr z, index
-			set addr [expr $idx + $dest]
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		30 { ;# jr nc, index
-			set addr [expr $idx + $dest]
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		38 { ;# jr c, index
-			set addr [expr $idx + $dest]
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		3a { ;# ld a,(word)
-			set x($curraddr) $dest
-			tag_DATA $dest
-		}
-		c4 { ;# call nz, address
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		cc { ;# call z, address
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		cd { ;# call address
-			set x($curraddr) $dest
-		}
-		d4 { ;# call nc, address
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		dc { ;# call c, address
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		e4 { ;# call po, address
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		e9 { ;# jp (hl)
-			set x($curraddr) [get_curraddr [peek16 [reg HL]]]
-		}
-		ec { ;# call pe, address
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		f4 { ;# call p, address
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
-		fc { ;# call m, address
-			set x($curraddr) $dest
-			tag_CODE $next
-		}
+proc analyze_branches {pc addr} {
+	# store extended address
+	set fulladdr [get_curraddr $addr]
+	set x($pc) $fulladdr
+	# tag conditional branches as CODE
+	if {[lsearch -exact [list 16 32 40 48 56 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] [peek $pc]] >= 0} {
+		log "conditional branch detected"
+		tag_address $addr
+		decode $addr
+		set next [get_curraddr [expr $pc + 3]]
+		tag_address $next
+		decode $next
 	}
 }
 
@@ -557,17 +507,22 @@ proc _read_mem {} {
 	variable comment
 
 	set fullpc [get_curraddr [reg PC]]
+	# process current instruction
 	if {$oldpc eq [reg PC]} {
 		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
 			tag_CODE [get_curraddr $::wp_last_address]
 			set _rr 0
 		} elseif {$::wp_last_address ne [expr [reg PC]]} {
-			# avoid infinite loop to PC
-			tag_DATA [get_curraddr $::wp_last_address]
+			set addr [get_curraddr $::wp_last_address]
+			set x($oldpc) $addr
+			tag_DATA $addr
+			#analyze_DATA $oldpc [get_curraddr $::wp_last_address]
+			# avoid PC infinite loop
 			set _rr 1
 		}
 	} else {
-		if {$oldpc ne {}} { analyze_CODE $oldpc }
+		# analyze last instruction
+		if {$oldpc ne {}} { analyze_branches $oldpc $::wp_last_address }
 		# put comment on new instruction if it exists
 		if {$comment ne {}} { tag_CMT $fullpc $comment }
 		# start new instruction
@@ -712,11 +667,6 @@ proc codeanalyzer_labelsize {{value {}}} {
 		return $label_size
 	}
 	set label_size $value
-}
-
-proc codeanalyzer_memvars {args} {
-	variable mem_vars
-	puts [array get mem_vars {*}$args]
 }
 
 proc load_bios {} {
