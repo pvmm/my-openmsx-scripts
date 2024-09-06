@@ -30,6 +30,7 @@ variable t ;# memory type array
 variable l ;# label array
 variable c ;# comment array
 variable x ;# extended address
+variable b ;# bios label array
 variable pc
 variable tmp_pc {}
 variable slot
@@ -426,11 +427,18 @@ proc labelfy {fulladdr} {
 
 # Find label for address or create a new one in the format "L_"<hex address>
 proc tag_address {fulladdr {name {}}} {
+	variable b
 	variable l
 	if {$name ne {}} {
 		set l($fulladdr) $name
 		return
 	}
+	# ignore BIOS address
+	set lbl [array get b $fulladdr]
+	if {[llength $lbl] ne 0} {
+		return
+	}
+	# tag CODE address
 	set lbl [array get l $fulladdr]
 	if {[llength $lbl] eq 0} {
 		# look for symbol in symbol table
@@ -459,19 +467,25 @@ proc tag_extra {pc fulladdr} {
 
 # create label from lookup (uses global tmp_pc)
 proc lookup_or_create {addr} {
+	variable b
 	variable l
 	variable tmp_pc
 	if {[env DEBUG] ne 0 &&   $addr eq {}} { error "missing parameter addr" }
 	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc" }
 
 	set fulladdr [get_curraddr $addr]
+	tag_extra $tmp_pc $fulladdr
+	# return BIOS address only
+	set lbl [array get b $fulladdr]
+	if {[llength $lbl] ne 0} {
+		comment $tmp_pc "BIOS access detected"
+		return [lindex $lbl 1]
+	}
+	# tag CODE address
 	set lbl [array get l $fulladdr]
 	if {[llength $lbl] eq 0} {
 		tag_address $fulladdr
-		tag_extra $tmp_pc $fulladdr
-		return $l($fulladdr)
 	}
-	tag_extra $tmp_pc $fulladdr
 	return [lindex $lbl 1]
 }
 
@@ -603,6 +617,7 @@ proc disasm_fmt {label asm comment} {
 }
 
 proc lookup {addr} {
+	variable b
 	variable l
 	variable x
 	variable tmp_pc
@@ -614,6 +629,14 @@ proc lookup {addr} {
 		set addr $x($tmp_pc)
 	}
 	#log "\[2\] searching [format %04x $addr]..."
+	# return BIOS address
+	set lbl [array get b $addr]
+	if {[llength $lbl] ne 0} {
+		#log "found BIOS entry @[format %04x $addr]: [lindex $lbl 1]"
+		comment $tmp_pc "BIOS access detected"
+		return [lindex $lbl 1]
+	}
+	# return CODE address
 	set lbl [array get l $addr]
 	if {[llength $lbl] ne 0} {
 		#log "found @[format %04x $addr]: [lindex $lbl 1]"
@@ -711,117 +734,117 @@ proc codeanalyzer_labelsize {{value {}}} {
 }
 
 proc load_bios {} {
-	variable l
-	set l([calc_addr 0 0 0x0006]) vdp.dr
-	set l([calc_addr 0 0 0x0007]) vdp.dw
-	set l([calc_addr 0 0 0x0008]) SYNCHR
-	set l([calc_addr 0 0 0x000c]) RDSLT
-	set l([calc_addr 0 0 0x0010]) CHRGTR
-	set l([calc_addr 0 0 0x0014]) WRSLT
-	set l([calc_addr 0 0 0x0018]) OUTDO
-	set l([calc_addr 0 0 0x001c]) CALSLT
-	set l([calc_addr 0 0 0x0020]) DCOMPR
-	set l([calc_addr 0 0 0x0024]) ENASLT
-	set l([calc_addr 0 0 0x0024]) ENASLT
-	set l([calc_addr 0 0 0x0028]) GETYPR
-	set l([calc_addr 0 0 0x0030]) CALLF
-	set l([calc_addr 0 0 0x0038]) KEYINT
-	set l([calc_addr 0 0 0x003b]) INITIO
-	set l([calc_addr 0 0 0x003e]) INIFNK
-	set l([calc_addr 0 0 0x0041]) DISSCR
-	set l([calc_addr 0 0 0x0044]) ENASCR
-	set l([calc_addr 0 0 0x0047]) WRTVDP
-	set l([calc_addr 0 0 0x004a]) RDVRM
-	set l([calc_addr 0 0 0x004d]) WRTVRM
-	set l([calc_addr 0 0 0x0050]) SETRD
-	set l([calc_addr 0 0 0x0053]) SETWRT
-	set l([calc_addr 0 0 0x0056]) FILVRM
-	set l([calc_addr 0 0 0x0059]) LDIRMV
-	set l([calc_addr 0 0 0x005c]) LDIRVM
-	set l([calc_addr 0 0 0x005f]) CHGMOD
-	set l([calc_addr 0 0 0x0062]) CHGCLR
-	set l([calc_addr 0 0 0x0066]) NMI
-	set l([calc_addr 0 0 0x0069]) CLRSPR
-	set l([calc_addr 0 0 0x006c]) INITXT
-	set l([calc_addr 0 0 0x006f]) INIT32
-	set l([calc_addr 0 0 0x006f]) INIGRP
-	set l([calc_addr 0 0 0x0075]) INIMLT
-	set l([calc_addr 0 0 0x0078]) SETTXT
-	set l([calc_addr 0 0 0x007b]) SETT32
-	set l([calc_addr 0 0 0x007e]) SETGRP
-	set l([calc_addr 0 0 0x0081]) SETMLT
-	set l([calc_addr 0 0 0x0084]) CALPAT
-	set l([calc_addr 0 0 0x0087]) CALATR
-	set l([calc_addr 0 0 0x008a]) GSPSIZ
-	set l([calc_addr 0 0 0x008d]) GSPPRT
-	set l([calc_addr 0 0 0x0090]) GICINI
-	set l([calc_addr 0 0 0x0093]) WRTPSG
-	set l([calc_addr 0 0 0x0096]) RDPSG
-	set l([calc_addr 0 0 0x0099]) STRTMS
-	set l([calc_addr 0 0 0x009c]) CHSNS
-	set l([calc_addr 0 0 0x009f]) CHGET
-	set l([calc_addr 0 0 0x00a2]) CHPUT
-	set l([calc_addr 0 0 0x00a5]) LPTOUT
-	set l([calc_addr 0 0 0x00a8]) LPTSTT
-	set l([calc_addr 0 0 0x00ab]) CNVCHR
-	set l([calc_addr 0 0 0x00ae]) PINLIN
-	set l([calc_addr 0 0 0x00b1]) INLIN
-	set l([calc_addr 0 0 0x00b4]) QINLIN
-	set l([calc_addr 0 0 0x00b7]) BREAKX
-	set l([calc_addr 0 0 0x00ba]) ISCNTC
-	set l([calc_addr 0 0 0x00bd]) CKCNTC
-	set l([calc_addr 0 0 0x00c0]) BEEP
-	set l([calc_addr 0 0 0x00c3]) CLS
-	set l([calc_addr 0 0 0x00c6]) POSIT
-	set l([calc_addr 0 0 0x00c9]) FNKSB
-	set l([calc_addr 0 0 0x00cc]) ERAFNK
-	set l([calc_addr 0 0 0x00cf]) DSPFNK
-	set l([calc_addr 0 0 0x00d2]) TOTEXT
-	set l([calc_addr 0 0 0x00d5]) GTSTCK
-	set l([calc_addr 0 0 0x00d8]) GTTRIG
-	set l([calc_addr 0 0 0x00db]) GTPAD
-	set l([calc_addr 0 0 0x00de]) GTPDL
-	set l([calc_addr 0 0 0x00e1]) TAPION
-	set l([calc_addr 0 0 0x00e4]) TAPIN
-	set l([calc_addr 0 0 0x00e7]) TAPIOF
-	set l([calc_addr 0 0 0x00ea]) TAPOON
-	set l([calc_addr 0 0 0x00ed]) TAPOUT
-	set l([calc_addr 0 0 0x00f0]) TAPOOF
-	set l([calc_addr 0 0 0x00f3]) STMOTR
-	set l([calc_addr 0 0 0x00f6]) LFTQ
-	set l([calc_addr 0 0 0x00f9]) PUTQ
-	set l([calc_addr 0 0 0x00fc]) RIGHTC
-	set l([calc_addr 0 0 0x00ff]) LEFTC
-	set l([calc_addr 0 0 0x0102]) UPC
-	set l([calc_addr 0 0 0x0105]) TUPC
-	set l([calc_addr 0 0 0x0108]) DOWNC
-	set l([calc_addr 0 0 0x010b]) TDOWNC
-	set l([calc_addr 0 0 0x010e]) SCALXY
-	set l([calc_addr 0 0 0x0111]) MAPXY
-	set l([calc_addr 0 0 0x0114]) FETCH
-	set l([calc_addr 0 0 0x0117]) STOREC
-	set l([calc_addr 0 0 0x011a]) SETATR
-	set l([calc_addr 0 0 0x011d]) READC
-	set l([calc_addr 0 0 0x0120]) SETC
-	set l([calc_addr 0 0 0x0123]) NSETCX
-	set l([calc_addr 0 0 0x0126]) GTASPC
-	set l([calc_addr 0 0 0x0129]) PNTINI
-	set l([calc_addr 0 0 0x012c]) SCANR
-	set l([calc_addr 0 0 0x012f]) SCANL
-	set l([calc_addr 0 0 0x0132]) CHGCAP
-	set l([calc_addr 0 0 0x0135]) CHGSND
-	set l([calc_addr 0 0 0x0138]) RSLREG
-	set l([calc_addr 0 0 0x013b]) WSLREG
-	set l([calc_addr 0 0 0x013e]) RDVDP
-	set l([calc_addr 0 0 0x0141]) SNSMAT
-	set l([calc_addr 0 0 0x0144]) PHYDIO
-	set l([calc_addr 0 0 0x0147]) FORMAT
-	set l([calc_addr 0 0 0x014a]) ISFLIO
-	set l([calc_addr 0 0 0x014d]) OUTDLP
-	set l([calc_addr 0 0 0x0150]) GETVCP
-	set l([calc_addr 0 0 0x0153]) GETVC2
-	set l([calc_addr 0 0 0x0156]) KILBUF
-	set l([calc_addr 0 0 0x0159]) CALBAS
+	variable b
+	set b([calc_addr 0 0 0x0006]) vdp.dr
+	set b([calc_addr 0 0 0x0007]) vdp.dw
+	set b([calc_addr 0 0 0x0008]) SYNCHR
+	set b([calc_addr 0 0 0x000c]) RDSLT
+	set b([calc_addr 0 0 0x0010]) CHRGTR
+	set b([calc_addr 0 0 0x0014]) WRSLT
+	set b([calc_addr 0 0 0x0018]) OUTDO
+	set b([calc_addr 0 0 0x001c]) CALSLT
+	set b([calc_addr 0 0 0x0020]) DCOMPR
+	set b([calc_addr 0 0 0x0024]) ENASLT
+	set b([calc_addr 0 0 0x0024]) ENASLT
+	set b([calc_addr 0 0 0x0028]) GETYPR
+	set b([calc_addr 0 0 0x0030]) CALLF
+	set b([calc_addr 0 0 0x0038]) KEYINT
+	set b([calc_addr 0 0 0x003b]) INITIO
+	set b([calc_addr 0 0 0x003e]) INIFNK
+	set b([calc_addr 0 0 0x0041]) DISSCR
+	set b([calc_addr 0 0 0x0044]) ENASCR
+	set b([calc_addr 0 0 0x0047]) WRTVDP
+	set b([calc_addr 0 0 0x004a]) RDVRM
+	set b([calc_addr 0 0 0x004d]) WRTVRM
+	set b([calc_addr 0 0 0x0050]) SETRD
+	set b([calc_addr 0 0 0x0053]) SETWRT
+	set b([calc_addr 0 0 0x0056]) FILVRM
+	set b([calc_addr 0 0 0x0059]) LDIRMV
+	set b([calc_addr 0 0 0x005c]) LDIRVM
+	set b([calc_addr 0 0 0x005f]) CHGMOD
+	set b([calc_addr 0 0 0x0062]) CHGCLR
+	set b([calc_addr 0 0 0x0066]) NMI
+	set b([calc_addr 0 0 0x0069]) CLRSPR
+	set b([calc_addr 0 0 0x006c]) INITXT
+	set b([calc_addr 0 0 0x006f]) INIT32
+	set b([calc_addr 0 0 0x006f]) INIGRP
+	set b([calc_addr 0 0 0x0075]) INIMLT
+	set b([calc_addr 0 0 0x0078]) SETTXT
+	set b([calc_addr 0 0 0x007b]) SETT32
+	set b([calc_addr 0 0 0x007e]) SETGRP
+	set b([calc_addr 0 0 0x0081]) SETMLT
+	set b([calc_addr 0 0 0x0084]) CALPAT
+	set b([calc_addr 0 0 0x0087]) CALATR
+	set b([calc_addr 0 0 0x008a]) GSPSIZ
+	set b([calc_addr 0 0 0x008d]) GSPPRT
+	set b([calc_addr 0 0 0x0090]) GICINI
+	set b([calc_addr 0 0 0x0093]) WRTPSG
+	set b([calc_addr 0 0 0x0096]) RDPSG
+	set b([calc_addr 0 0 0x0099]) STRTMS
+	set b([calc_addr 0 0 0x009c]) CHSNS
+	set b([calc_addr 0 0 0x009f]) CHGET
+	set b([calc_addr 0 0 0x00a2]) CHPUT
+	set b([calc_addr 0 0 0x00a5]) LPTOUT
+	set b([calc_addr 0 0 0x00a8]) LPTSTT
+	set b([calc_addr 0 0 0x00ab]) CNVCHR
+	set b([calc_addr 0 0 0x00ae]) PINLIN
+	set b([calc_addr 0 0 0x00b1]) INLIN
+	set b([calc_addr 0 0 0x00b4]) QINLIN
+	set b([calc_addr 0 0 0x00b7]) BREAKX
+	set b([calc_addr 0 0 0x00ba]) ISCNTC
+	set b([calc_addr 0 0 0x00bd]) CKCNTC
+	set b([calc_addr 0 0 0x00c0]) BEEP
+	set b([calc_addr 0 0 0x00c3]) CLS
+	set b([calc_addr 0 0 0x00c6]) POSIT
+	set b([calc_addr 0 0 0x00c9]) FNKSB
+	set b([calc_addr 0 0 0x00cc]) ERAFNK
+	set b([calc_addr 0 0 0x00cf]) DSPFNK
+	set b([calc_addr 0 0 0x00d2]) TOTEXT
+	set b([calc_addr 0 0 0x00d5]) GTSTCK
+	set b([calc_addr 0 0 0x00d8]) GTTRIG
+	set b([calc_addr 0 0 0x00db]) GTPAD
+	set b([calc_addr 0 0 0x00de]) GTPDL
+	set b([calc_addr 0 0 0x00e1]) TAPION
+	set b([calc_addr 0 0 0x00e4]) TAPIN
+	set b([calc_addr 0 0 0x00e7]) TAPIOF
+	set b([calc_addr 0 0 0x00ea]) TAPOON
+	set b([calc_addr 0 0 0x00ed]) TAPOUT
+	set b([calc_addr 0 0 0x00f0]) TAPOOF
+	set b([calc_addr 0 0 0x00f3]) STMOTR
+	set b([calc_addr 0 0 0x00f6]) LFTQ
+	set b([calc_addr 0 0 0x00f9]) PUTQ
+	set b([calc_addr 0 0 0x00fc]) RIGHTC
+	set b([calc_addr 0 0 0x00ff]) LEFTC
+	set b([calc_addr 0 0 0x0102]) UPC
+	set b([calc_addr 0 0 0x0105]) TUPC
+	set b([calc_addr 0 0 0x0108]) DOWNC
+	set b([calc_addr 0 0 0x010b]) TDOWNC
+	set b([calc_addr 0 0 0x010e]) SCALXY
+	set b([calc_addr 0 0 0x0111]) MAPXY
+	set b([calc_addr 0 0 0x0114]) FETCH
+	set b([calc_addr 0 0 0x0117]) STOREC
+	set b([calc_addr 0 0 0x011a]) SETATR
+	set b([calc_addr 0 0 0x011d]) READC
+	set b([calc_addr 0 0 0x0120]) SETC
+	set b([calc_addr 0 0 0x0123]) NSETCX
+	set b([calc_addr 0 0 0x0126]) GTASPC
+	set b([calc_addr 0 0 0x0129]) PNTINI
+	set b([calc_addr 0 0 0x012c]) SCANR
+	set b([calc_addr 0 0 0x012f]) SCANL
+	set b([calc_addr 0 0 0x0132]) CHGCAP
+	set b([calc_addr 0 0 0x0135]) CHGSND
+	set b([calc_addr 0 0 0x0138]) RSLREG
+	set b([calc_addr 0 0 0x013b]) WSLREG
+	set b([calc_addr 0 0 0x013e]) RDVDP
+	set b([calc_addr 0 0 0x0141]) SNSMAT
+	set b([calc_addr 0 0 0x0144]) PHYDIO
+	set b([calc_addr 0 0 0x0147]) FORMAT
+	set b([calc_addr 0 0 0x014a]) ISFLIO
+	set b([calc_addr 0 0 0x014d]) OUTDLP
+	set b([calc_addr 0 0 0x0150]) GETVCP
+	set b([calc_addr 0 0 0x0153]) GETVC2
+	set b([calc_addr 0 0 0x0156]) KILBUF
+	set b([calc_addr 0 0 0x0159]) CALBAS
 }
 
 namespace export codeanalyzer
