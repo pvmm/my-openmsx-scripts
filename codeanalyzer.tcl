@@ -407,7 +407,7 @@ proc tag_CODE {fulladdr} {
 	}
 }
 
-proc tag_CMT {fulladdr comment} {
+proc comment {fulladdr comment} {
 	variable c
 	set curcmt [array get c $fulladdr]
 	if {[llength $curcmt] eq 0} {
@@ -479,6 +479,7 @@ proc disasm_blob {fulladdr lookup} {
 	append blob [format %c [peek [expr $fulladdr + 3] {slotted memory}]]
 	set tmp_pc $fulladdr
 	if {[catch {set result [debug disasm_blob $blob $fulladdr $lookup]} fid]} {
+		comment $fulladdr "warning: invalid Z80 code"
 		set result "db     "
 		for {set i 0} {$i < [string length $blob]} {incr i} {
 			append result "#[format %02x [scan [string index $blob $i] %c],"
@@ -567,7 +568,7 @@ proc _read_mem {} {
 		# start new instruction
 		tag_CODE [get_curraddr [reg PC]]
 		# put comment on new instruction if it exists
-		if {$comment ne {}} { tag_CMT $fullpc $comment }
+		if {$comment ne {}} { comment $fullpc $comment }
 	}
 	set oldpc [reg PC]
 	set last_mem_read $::wp_last_address
