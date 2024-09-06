@@ -478,7 +478,14 @@ proc disasm_blob {fulladdr lookup} {
 	append blob [format %c [peek [expr $fulladdr + 2] {slotted memory}]]
 	append blob [format %c [peek [expr $fulladdr + 3] {slotted memory}]]
 	set tmp_pc $fulladdr
-	return [debug disasm_blob $blob [expr $fulladdr & 0xffff] $lookup]
+	if {[catch {set result [debug disasm_blob $blob $fulladdr $lookup]} fid]} {
+		set result "db     "
+		for {set i 0} {$i < [string length $blob]} {incr i} {
+			append result "#[format %02x [scan [string index $blob $i] %c],"
+		}
+		set result [list [string trimright $result ,] 4]
+	}
+	return $result
 }
 
 proc tag_decoded {fulladdr lookup} {
@@ -618,7 +625,9 @@ proc disasm {source_file fulladdr blob {byte {}}} {
 	while {[string length $blob] > 0} {
 		if {$byte eq {}} {
 			set tmp_pc $fulladdr
-			set asm [debug disasm_blob $blob $fulladdr lookup]
+			if {[catch {set asm [debug disasm_blob $blob $fulladdr lookup]} fid]} {
+				error "[format %04x [expr $fulladdr & 0xffff]]: $fid"
+			}
 		} else {
 			set asm [list "db     #[format %02x $byte]" 1]
 		}
