@@ -608,15 +608,15 @@ proc lookup {addr} {
 	variable tmp_pc
 	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc \[1\]" }
 
-	log "\[1\] searching [format %04x $tmp_pc] [format %04x $addr]..."
+	#log "\[1\] searching [format %04x $tmp_pc] [format %04x $addr]..."
 	# search extended address information
 	if {[array get x $tmp_pc] ne {}} {
 		set addr $x($tmp_pc)
 	}
-	log "\[2\] searching [format %04x $addr]..."
+	#log "\[2\] searching [format %04x $addr]..."
 	set lbl [array get l $addr]
 	if {[llength $lbl] ne 0} {
-		log "found @[format %04x $addr]: [lindex $lbl 1]"
+		#log "found @[format %04x $addr]: [lindex $lbl 1]"
 		return [lindex $lbl 1]
 	}
 	return ""
