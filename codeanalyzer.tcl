@@ -460,7 +460,7 @@ proc tag_address {fulladdr {name {}}} {
 proc tag_extra {pc fulladdr} {
 	variable x
 	if {[array get x $pc] eq {}} {
-		log "store slot and subslot for [format %04x $pc]: [format %04x $fulladdr]"
+		log "tag slot and subslot for [format %04x $pc]: [format %04x $fulladdr]"
 		set x($pc) $fulladdr
 	}
 }
@@ -520,24 +520,36 @@ proc tag_decoded {fulladdr lookup} {
 	}
 }
 
-# Detect functions, BIOS calls etc.
-proc analyze_code {addr} {
-	if {[env DEBUG] ne 0 && $addr eq {}} { error "missing parameter addr" }
-	# store extended address
-	# tag conditional branches as CODE
-	if {[lsearch -exact [list 16 32 40 48 56 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] [peek $addr]] >= 0} {
-		log "analyze_code started"
-		set fulladdr [get_curraddr $addr]
-		log "conditional branch detected at [format %04x $fulladdr]"
-		set dest [get_curraddr [peek16 [expr $fulladdr + 1] {slotted memory}]]
-		tag_extra $fulladdr $dest
-		tag_address $dest
-		tag_decoded $dest lookup
-		set next [expr $fulladdr + 3]
-		#tag_address $next
-		tag_decoded $next lookup_or_create
-		log "analyze_code done"
+# Detect functions, branches, BIOS calls etc.
+proc analyze_code {pc} {
+	variable x
+	set fullpc [get_curraddr $pc]
+	# already visited?
+	if {[array get x $fullpc] ne {}} {
+		return
 	}
+	# tag conditional relative branches as CODE
+	if {[lsearch -exact [list 16 32 40 48 56] [peek $pc]] >= 0} {
+		log "analyze_code started: relative conditional branch detected at [format %04x $fullpc]"
+		set dest [expr $fullpc + [peek_s8 [expr $fullpc + 1] {slotted memory}]]
+		tag_extra $fullpc $dest
+		tag_address $dest
+		tag_decoded $dest lookup_or_create
+		set next [expr $fullpc + 2] ;# next instruction in adjacent memory
+		tag_decoded $next lookup_or_create
+	}
+	# tag conditional absolute branches as CODE
+	if {[lsearch -exact [list 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] [peek $pc]] >= 0} {
+		log "analyze_code started: absolute conditional branch detected at [format %04x $fullpc]"
+		set dest [get_curraddr [peek16 [expr $fullpc + 1] {slotted memory}]]
+		tag_extra $fullpc $dest
+		tag_address $dest
+		tag_decoded $dest lookup_or_create
+		set next [expr $fullpc + 3] ;# next instruction in adjacent memory
+		tag_decoded $next lookup_or_create
+	}
+	tag_extra $fullpc $fullpc
+	log "analyze_code done"
 }
 
 # hex or "null"
