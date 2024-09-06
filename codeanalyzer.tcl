@@ -448,10 +448,18 @@ proc tag_address {fulladdr {name {}}} {
 	}
 }
 
+# tag PC with extra information on memory access
+proc tag_extra {pc fulladdr} {
+	variable x
+	if {[array get x $pc] eq {}} {
+		log "store slot and subslot for [format %04x $pc]: [format %04x $fulladdr]"
+		set x($pc) $fulladdr
+	}
+}
+
 # create label from lookup (uses global tmp_pc)
 proc lookup_or_create {addr} {
 	variable l
-	variable x
 	variable tmp_pc
 	if {[env DEBUG] ne 0 &&   $addr eq {}} { error "missing parameter addr" }
 	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc" }
@@ -460,12 +468,10 @@ proc lookup_or_create {addr} {
 	set lbl [array get l $fulladdr]
 	if {[llength $lbl] eq 0} {
 		tag_address $fulladdr
-		log "store slot and subslot for [format %04x $tmp_pc]: [format %04x $fulladdr]"
-		set x($tmp_pc) $fulladdr
+		tag_extra $tmp_pc $fulladdr
 		return $l($fulladdr)
 	}
-	log "store slot and subslot for [format %04x $tmp_pc]: [format %04x $fulladdr]"
-	set x($tmp_pc) $fulladdr
+	tag_extra $tmp_pc $fulladdr
 	return [lindex $lbl 1]
 }
 
@@ -507,11 +513,10 @@ proc analyze_code {addr} {
 	# tag conditional branches as CODE
 	if {[lsearch -exact [list 16 32 40 48 56 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] [peek $addr]] >= 0} {
 		log "analyze_code started"
-		variable x
 		set fulladdr [get_curraddr $addr]
 		log "conditional branch detected at [format %04x $fulladdr]"
 		set dest [get_curraddr [peek16 [expr $fulladdr + 1] {slotted memory}]]
-		set x($fulladdr) $dest
+		tag_extra $fulladdr $dest
 		tag_address $dest
 		tag_decoded $dest lookup
 		set next [expr $fulladdr + 3]
@@ -531,7 +536,6 @@ proc xe {num {i 4}} {
 
 proc _read_mem {} {
 	variable t
-	variable x
 	variable oldpc
 	variable inslen
 	variable last_mem_read
@@ -548,10 +552,8 @@ proc _read_mem {} {
 			set _rr 0
 		} elseif {$::wp_last_address ne [expr [reg PC]]} {
 			set fulladdr [get_curraddr $::wp_last_address]
+			tag_extra $fullpc $fulladdr
 			tag_address $fulladdr
-			log "store slot and subslot in [xe $fullpc]: [xe $fulladdr]"
-			# store slot and subslot information in run time
-			set x($fullpc) $fulladdr
 			tag_DATA $fulladdr
 			# avoid PC infinite loop
 			set _rr 1
@@ -564,9 +566,8 @@ proc _read_mem {} {
 			if {$::wp_last_address ne {} && [expr abs($::wp_last_address - $oldpc)] >= 4} {
 				set oldpc    [get_curraddr $oldpc]
 				set fulladdr [get_curraddr $::wp_last_address]
+				tag_extra $oldpc $fulladdr
 				tag_address $fulladdr
-				log "store slot and subslot in [xe $oldpc]: [xe $fulladdr]"
-				set x($oldpc) $fulladdr
 			}
 		}
 		# start new instruction
