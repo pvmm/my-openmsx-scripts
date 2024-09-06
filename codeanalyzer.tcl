@@ -448,7 +448,7 @@ proc tag_address {fulladdr {name {}}} {
 	}
 }
 
-# create label from lookup
+# create label from lookup (uses global tmp_pc)
 proc lookup_or_create {addr} {
 	variable l
 	variable x
@@ -469,24 +469,28 @@ proc lookup_or_create {addr} {
 	return [lindex $lbl 1]
 }
 
-proc disasm_blob {fulladdr lookup} {
+proc _disasm {blob fulladdr lookup} {
 	variable tmp_pc
+	set tmp_pc $fulladdr
+	if {[catch {set result [debug disasm_blob $blob $fulladdr $lookup]} fid]} {
+		comment $fulladdr "warning: invalid Z80 code detected"
+		set result "db     "
+		for {set i 0} {$i < [string length $blob]} {incr i} {
+			append result "#[format %02x [scan [string index $blob $i] %c]],"
+		}
+		set result [list [string trimright $result ,] 4]
+	}
+	return $result
+}
+
+proc disasm_blob {fulladdr lookup} {
 	if {[env DEBUG] ne 0 && $fulladdr eq {}} { error "missing parameter fulladdr" }
 	set blob ""
 	append blob [format %c [peek $fulladdr {slotted memory}]]
 	append blob [format %c [peek [expr $fulladdr + 1] {slotted memory}]]
 	append blob [format %c [peek [expr $fulladdr + 2] {slotted memory}]]
 	append blob [format %c [peek [expr $fulladdr + 3] {slotted memory}]]
-	set tmp_pc $fulladdr
-	if {[catch {set result [debug disasm_blob $blob $fulladdr $lookup]} fid]} {
-		comment $fulladdr "warning: invalid Z80 code"
-		set result "db     "
-		for {set i 0} {$i < [string length $blob]} {incr i} {
-			append result "#[format %02x [scan [string index $blob $i] %c],"
-		}
-		set result [list [string trimright $result ,] 4]
-	}
-	return $result
+	return [_disasm $blob $fulladdr $lookup]
 }
 
 proc tag_decoded {fulladdr lookup} {
@@ -535,7 +539,7 @@ proc _read_mem {} {
 	variable comment
 
 	set fullpc [get_curraddr [reg PC]]
-	log "pc: [xe $oldpc] -> [xe $fullpc], read: [xe $::wp_last_address]"
+	#log "pc: [xe $oldpc] -> [xe $fullpc], read: [xe $::wp_last_address]"
 	# process current instruction
 	if {$oldpc eq [reg PC]} {
 		# detect if ::wp_last_address is still reading instructions
@@ -620,15 +624,11 @@ proc lookup {addr} {
 proc disasm {source_file fulladdr blob {byte {}}} {
 	variable l
 	variable c
-	variable tmp_pc
 	variable comment
 
 	while {[string length $blob] > 0} {
 		if {$byte eq {}} {
-			set tmp_pc $fulladdr
-			if {[catch {set asm [debug disasm_blob $blob $fulladdr lookup]} fid]} {
-				error "[format %04x [expr $fulladdr & 0xffff]]: $fid"
-			}
+			set asm [_disasm $blob $fulladdr lookup]
 		} else {
 			set asm [list "db     #[format %02x $byte]" 1]
 		}
