@@ -155,7 +155,7 @@ proc subslot {{defaults {}}} {
 }
 
 # Get complete address in {slotted memory} format: [slot][subslot][64kb addr]
-proc get_compaddr {addr} {
+proc get_slotaddr {addr} {
 	variable slot
 	if {![info exists slot]} {
 		error "no slot defined"
@@ -179,11 +179,13 @@ proc _get_selected_slot {page} {
 }
 
 proc calc_addr {slot subslot addr} {
+	if {[env DEBUG] ne 0 && ($slot eq {} || $subslot eq {} || $addr eq {})} { error "parameters missing" }
 	return [expr ($slot << 18) | ($subslot << 16) | $addr]
 }
 
 # Get current address as used in {slotted memory} format: [current slot][current subslot][64KB addr]
 proc get_curraddr {addr} {
+	if {[env DEBUG] ne 0 && $addr eq {}} { error "address missing" }
 	return [calc_addr {*}[list {*}[_get_selected_slot [expr $addr >> 14]] $addr]]
 }
 
@@ -264,7 +266,7 @@ proc _scancart {} {
 	variable start_point
 	variable entry_point
 	foreach offset [list 0x4000 0x8000 0x0000] { ;# memory search order
-		set addr [get_compaddr $offset]
+		set addr [get_slotaddr $offset]
 		set tmp [peek16 $addr {slotted memory}]
 		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
 		if {$prefix eq "AB"} {
@@ -362,144 +364,162 @@ proc env {varname {defaults {}}} {
 	return $defaults;
 }
 
-proc tag_DATA {addr} {
+proc tag_DATA {fulladdr} {
 	variable t
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
 
-	set addr [get_compaddr $addr]
-	set type [array get t $addr]
+	set type [array get t $fulladdr]
 	if {$type eq [NAUGHT]} {
-		set t($addr) [DATA]
+		set t($fulladdr) [DATA]
 		if {[env LOGLEVEL] eq 1} {
-			log "tagging [format %04x [expr $addr & 0xffff]] as DATA"
+			log "tagging [format %04x $fulladdr] as DATA"
 		}
 		incr DATA_recs
-	} elseif {$t($addr) eq [CODE]} {
-		log "warning: overwritting address type in [format %04x [expr $addr & 0xffff]] from CODE to BOTH"
-		set t($addr) [BOTH]
+	} elseif {$t($fulladdr) eq [CODE]} {
+		log "warning: overwritting address type in [format %04x $fulladdr] from CODE to BOTH"
+		set t($fulladdr) [BOTH]
 		incr CODE_recs -1
 		incr BOTH_recs
 	}
 }
 
-proc tag_DATA_v {first args} {
-	;# v is for variable args
-	tag_DATA $first
-	foreach addr $args { tag_DATA $addr }
-}
-
-proc tag_JP_c {index} {
-	;# c is for conditional jump
-	;# tag all possible paths (branch or not)
-	tag_CODE [expr [reg PC] + $index]
-	tag_CODE [expr [reg PC] + 2]
-}
-
-proc tag_CALL {addr} {
-	;# tag all possible paths (branch and return)
-	tag_CODE $addr
-	tag_CODE [expr [reg PC] + 2]
-}
-
-proc tag_CODE {addr} {
+proc tag_CODE {fulladdr} {
 	variable t
 	variable l
 	variable DATA_recs
 	variable CODE_recs
 	variable BOTH_recs
 
-	set addr [get_compaddr $addr]
-	set type [array get t $addr]
+	set type [array get t $fulladdr]
 	if {$type eq [NAUGHT]} {
 		if {[env LOGLEVEL] eq 1} {
-			log "tagging [format %04x [expr $addr & 0xffff]] as CODE"
+			log "tagging [format %04x $fulladdr] as CODE"
 		}
-		set t($addr) [CODE]
+		set t($fulladdr) [CODE]
 		incr CODE_recs
-	} elseif {$t($addr) eq [DATA]} {
-		log "warning: overwritting address type in [format %04x [expr $addr & 0xffff]] from DATA to BOTH"
-		set t($addr) [BOTH]
+	} elseif {$t($fulladdr) eq [DATA]} {
+		log "warning: overwritting address type in [format %04x $fulladdr] from DATA to BOTH"
+		set t($fulladdr) [BOTH]
 		incr DATA_recs -1
 		incr BOTH_recs
 	}
 }
 
-proc tag_CMT {addr comment} {
+proc tag_CMT {fulladdr comment} {
 	variable c
-	set curcmt [array get c $addr]
+	set curcmt [array get c $fulladdr]
 	if {[llength $curcmt] eq 0} {
-		set c($addr) $comment
+		set c($fulladdr) $comment
 	} else {
-		if {[string first $comment $c($addr)] eq -1} {
+		if {[string first $comment $c($fulladdr)] eq -1} {
 			log "append comment at $curcmt: $comment"
-			set c($addr) "[lindex $curcmt 1], $comment"
+			set c($fulladdr) "[lindex $curcmt 1], $comment"
 		}
 	}
 }
 
-proc labelfy {addr} {
-	return "L_[format %04X [expr $addr & 0xffff]]"
+proc labelfy {fulladdr} {
+	return "L_[format %04X [expr $fulladdr & 0xffff]]"
 }
 
 # Find label for address or create a new one in the format "L_"<hex address>
-proc tag_address {addr {name {}}} {
+proc tag_address {fulladdr {name {}}} {
 	variable l
 	if {$name ne {}} {
-		set l($addr) $name
+		set l($fulladdr) $name
 		return
 	}
-	set lbl [array get l $addr]
+	set lbl [array get l $fulladdr]
 	if {[llength $lbl] eq 0} {
 		# look for symbol in symbol table
-		set syms [debug symbols lookup -value [expr 0xffff & $addr]]
+		set syms [debug symbols lookup -value [expr 0xffff & $fulladdr]]
 		if {[llength $syms] > 0} {
 			set sym [lindex $syms 0]
 			set name [lindex $sym 3]
-			log "found symbol $name in [format %06x $addr]"
-			set l($addr) $name
+			log "[format %04x $fulladdr]: found symbol $name"
+			set l($fulladdr) $name
 		} elseif {$lbl eq [NAUGHT]} {
-			set name [labelfy $addr]
-			set l($addr) $name
+			set name [labelfy $fulladdr]
+			log "[format %04x $fulladdr]: address tagged with new name $name."
+			set l($fulladdr) $name
 		}
 	}
 }
 
-proc disasm_blob {addr} {
-	set blob ""
-	set xaddr [get_curraddr $addr]
-	append blob [format %c [peek $xaddr {slotted memory}]]
-	append blob [format %c [peek [expr $xaddr + 1] {slotted memory}]]
-	append blob [format %c [peek [expr $xaddr + 2] {slotted memory}]]
-	append blob [format %c [peek [expr $xaddr + 3] {slotted memory}]]
-	return [debug disasm_blob $blob $addr]
+# create label from lookup
+proc lookup_or_create {addr} {
+	variable l
+	variable x
+	variable tmp_pc
+	if {[env DEBUG] ne 0 &&   $addr eq {}} { error "missing parameter addr" }
+	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc" }
+
+	set fulladdr [get_curraddr $addr]
+	set lbl [array get l $fulladdr]
+	if {[llength $lbl] eq 0} {
+		tag_address $fulladdr
+		log "store slot and subslot for [format %04x $tmp_pc]: [format %04x $fulladdr]"
+		set x($tmp_pc) $fulladdr
+		return $l($fulladdr)
+	}
+	log "store slot and subslot for [format %04x $tmp_pc]: [format %04x $fulladdr]"
+	set x($tmp_pc) $fulladdr
+	return [lindex $lbl 1]
 }
 
-proc decode {addr} {
-	set len [lindex [disasm_blob $addr] 1]
+proc disasm_blob {fulladdr lookup} {
+	variable tmp_pc
+	if {[env DEBUG] ne 0 && $fulladdr eq {}} { error "missing parameter fulladdr" }
+	set blob ""
+	append blob [format %c [peek $fulladdr {slotted memory}]]
+	append blob [format %c [peek [expr $fulladdr + 1] {slotted memory}]]
+	append blob [format %c [peek [expr $fulladdr + 2] {slotted memory}]]
+	append blob [format %c [peek [expr $fulladdr + 3] {slotted memory}]]
+	set tmp_pc $fulladdr
+	return [debug disasm_blob $blob [expr $fulladdr & 0xffff] $lookup]
+}
+
+proc tag_decoded {fulladdr lookup} {
+	set len [lindex [disasm_blob $fulladdr $lookup] 1]
 	for {set i 0} {$i < $len} {incr i} {
-		tag_CODE [get_curraddr [expr $addr + $i]]
+		tag_CODE [expr $fulladdr + $i]
 	}
 }
 
 # Detect functions, BIOS calls etc.
-proc analyze_branches {pc addr} {
+proc analyze_code {addr} {
+	if {[env DEBUG] ne 0 && $addr eq {}} { error "missing parameter addr" }
 	# store extended address
-	set fulladdr [get_curraddr $addr]
-	set x($pc) $fulladdr
 	# tag conditional branches as CODE
-	if {[lsearch -exact [list 16 32 40 48 56 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] [peek $pc]] >= 0} {
-		log "conditional branch detected"
-		tag_address $addr
-		decode $addr
-		set next [get_curraddr [expr $pc + 3]]
-		tag_address $next
-		decode $next
+	if {[lsearch -exact [list 16 32 40 48 56 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] [peek $addr]] >= 0} {
+		log "analyze_code started"
+		variable x
+		set fulladdr [get_curraddr $addr]
+		log "conditional branch detected at [format %04x $fulladdr]"
+		set dest [get_curraddr [peek16 [expr $fulladdr + 1] {slotted memory}]]
+		set x($fulladdr) $dest
+		tag_address $dest
+		tag_decoded $dest lookup
+		set next [expr $fulladdr + 3]
+		#tag_address $next
+		tag_decoded $next lookup_or_create
+		log "analyze_code done"
 	}
 }
 
+# hex or "null"
+proc xe {num {i 4}} {
+	if {$num eq ""} {
+		return "ø"
+	}
+	return [format "%0${i}x" $num]
+}
+
 proc _read_mem {} {
+	variable t
+	variable x
 	variable oldpc
 	variable inslen
 	variable last_mem_read
@@ -507,30 +527,40 @@ proc _read_mem {} {
 	variable comment
 
 	set fullpc [get_curraddr [reg PC]]
+	log "pc: [xe $oldpc] -> [xe $fullpc], read: [xe $::wp_last_address]"
 	# process current instruction
 	if {$oldpc eq [reg PC]} {
+		# detect if ::wp_last_address is still reading instructions
 		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
 			tag_CODE [get_curraddr $::wp_last_address]
 			set _rr 0
 		} elseif {$::wp_last_address ne [expr [reg PC]]} {
-			set addr [get_curraddr $::wp_last_address]
-			set x($oldpc) $addr
-			tag_DATA $addr
-			#analyze_DATA $oldpc [get_curraddr $::wp_last_address]
+			set fulladdr [get_curraddr $::wp_last_address]
+			tag_address $fulladdr
+			log "store slot and subslot in [xe $fullpc]: [xe $fulladdr]"
+			# store slot and subslot information in run time
+			set x($fullpc) $fulladdr
+			tag_DATA $fulladdr
 			# avoid PC infinite loop
 			set _rr 1
 		}
 	} else {
 		# analyze last instruction
-		if {$oldpc ne {}} { analyze_branches $oldpc $::wp_last_address }
-		# put comment on new instruction if it exists
-		if {$comment ne {}} { tag_CMT $fullpc $comment }
+		if {$oldpc ne {}} {
+			analyze_code $oldpc
+			# detect branch and set label
+			if {$::wp_last_address ne {} && [expr abs($::wp_last_address - $oldpc)] >= 4} {
+				set oldpc    [get_curraddr $oldpc]
+				set fulladdr [get_curraddr $::wp_last_address]
+				tag_address $fulladdr
+				log "store slot and subslot in [xe $oldpc]: [xe $fulladdr]"
+				set x($oldpc) $fulladdr
+			}
+		}
 		# start new instruction
 		tag_CODE [get_curraddr [reg PC]]
-		# detect branch and set label
-		if {$::wp_last_address ne [expr $last_mem_read + 1] && $_rr eq 0} {
-			tag_address $fullpc
-		}
+		# put comment on new instruction if it exists
+		if {$comment ne {}} { tag_CMT $fullpc $comment }
 	}
 	set oldpc [reg PC]
 	set last_mem_read $::wp_last_address
@@ -563,14 +593,14 @@ proc lookup {addr} {
 	variable l
 	variable x
 	variable tmp_pc
+	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc \[1\]" }
 
-	log "searching [format %04x $addr]..."
+	log "\[1\] searching [format %04x $tmp_pc] [format %04x $addr]..."
 	# search extended address information
 	if {[array get x $tmp_pc] ne {}} {
 		set addr $x($tmp_pc)
-	} else {
-		set addr [get_compaddr $addr]
 	}
+	log "\[2\] searching [format %04x $addr]..."
 	set lbl [array get l $addr]
 	if {[llength $lbl] ne 0} {
 		log "found @[format %04x $addr]: [lindex $lbl 1]"
@@ -579,7 +609,7 @@ proc lookup {addr} {
 	return ""
 }
 
-proc disasm {source_file addr blob {byte {}}} {
+proc disasm {source_file fulladdr blob {byte {}}} {
 	variable l
 	variable c
 	variable tmp_pc
@@ -587,29 +617,29 @@ proc disasm {source_file addr blob {byte {}}} {
 
 	while {[string length $blob] > 0} {
 		if {$byte eq {}} {
-			set tmp_pc $addr
-			set asm [debug disasm_blob $blob $addr lookup]
+			set tmp_pc $fulladdr
+			set asm [debug disasm_blob $blob $fulladdr lookup]
 		} else {
 			set asm [list "db     #[format %02x $byte]" 1]
 		}
 		set blob [string range $blob [lindex $asm 1] end]
-		set lbl  [array get l $addr]
-		set cmt  [array get c $addr]
+		set lbl  [array get l $fulladdr]
+		set cmt  [array get c $fulladdr]
 
-		if {$lbl ne {}} { set lbl $l($addr) }
-		if {$cmt ne {}} { set cmt $c($addr) }
+		if {$lbl ne {}} { set lbl $l($fulladdr) }
+		if {$cmt ne {}} { set cmt $c($fulladdr) }
 		puts $source_file [disasm_fmt $lbl [lindex $asm 0] $cmt]
-		incr addr [lindex $asm 1]
+		incr fulladdr [lindex $asm 1]
 	}
 }
 
-proc dump_mem {source_file addr} {
-	disasm $source_file $addr "\0" [peek $addr {slotted memory}]
+proc dump_mem {source_file fulladdr} {
+	disasm $source_file $fulladdr "\0" [peek $fulladdr {slotted memory}]
 }
 
-proc dump_blob {source_file start_addr blob} {
+proc dump_blob {source_file fulladdr blob} {
 	if {$blob ne ""} {
-		disasm $source_file $start_addr $blob
+		disasm $source_file $fulladdr $blob
 	}
 	return ""
 }
@@ -632,10 +662,10 @@ proc codeanalyzer_dump {{filename "./source.asm"}} {
 	if {$start_point eq {}} {
 		error "unknown program entry point"
 	}
-	tag_address [get_curraddr $start_point] "START"
-	tag_address [get_curraddr $entry_point] "MAIN"
+	tag_address [get_slotaddr $start_point] "START"
+	tag_address [get_slotaddr $entry_point] "MAIN"
 	for {set offset $start_point} {$offset < $end_point} {incr offset} {
-		set addr [get_compaddr $offset]
+		set addr [get_slotaddr $offset]
 		if {[array get t $addr] ne {}} {
 			set type $t($addr)
 			if {$type eq [CODE]} {
@@ -673,6 +703,114 @@ proc load_bios {} {
 	variable l
 	set l([calc_addr 0 0 0x0006]) vdp.dr
 	set l([calc_addr 0 0 0x0007]) vdp.dw
+	set l([calc_addr 0 0 0x0008]) SYNCHR
+	set l([calc_addr 0 0 0x000c]) RDSLT
+	set l([calc_addr 0 0 0x0010]) CHRGTR
+	set l([calc_addr 0 0 0x0014]) WRSLT
+	set l([calc_addr 0 0 0x0018]) OUTDO
+	set l([calc_addr 0 0 0x001c]) CALSLT
+	set l([calc_addr 0 0 0x0020]) DCOMPR
+	set l([calc_addr 0 0 0x0024]) ENASLT
+	set l([calc_addr 0 0 0x0024]) ENASLT
+	set l([calc_addr 0 0 0x0028]) GETYPR
+	set l([calc_addr 0 0 0x0030]) CALLF
+	set l([calc_addr 0 0 0x0038]) KEYINT
+	set l([calc_addr 0 0 0x003b]) INITIO
+	set l([calc_addr 0 0 0x003e]) INIFNK
+	set l([calc_addr 0 0 0x0041]) DISSCR
+	set l([calc_addr 0 0 0x0044]) ENASCR
+	set l([calc_addr 0 0 0x0047]) WRTVDP
+	set l([calc_addr 0 0 0x004a]) RDVRM
+	set l([calc_addr 0 0 0x004d]) WRTVRM
+	set l([calc_addr 0 0 0x0050]) SETRD
+	set l([calc_addr 0 0 0x0053]) SETWRT
+	set l([calc_addr 0 0 0x0056]) FILVRM
+	set l([calc_addr 0 0 0x0059]) LDIRMV
+	set l([calc_addr 0 0 0x005c]) LDIRVM
+	set l([calc_addr 0 0 0x005f]) CHGMOD
+	set l([calc_addr 0 0 0x0062]) CHGCLR
+	set l([calc_addr 0 0 0x0066]) NMI
+	set l([calc_addr 0 0 0x0069]) CLRSPR
+	set l([calc_addr 0 0 0x006c]) INITXT
+	set l([calc_addr 0 0 0x006f]) INIT32
+	set l([calc_addr 0 0 0x006f]) INIGRP
+	set l([calc_addr 0 0 0x0075]) INIMLT
+	set l([calc_addr 0 0 0x0078]) SETTXT
+	set l([calc_addr 0 0 0x007b]) SETT32
+	set l([calc_addr 0 0 0x007e]) SETGRP
+	set l([calc_addr 0 0 0x0081]) SETMLT
+	set l([calc_addr 0 0 0x0084]) CALPAT
+	set l([calc_addr 0 0 0x0087]) CALATR
+	set l([calc_addr 0 0 0x008a]) GSPSIZ
+	set l([calc_addr 0 0 0x008d]) GSPPRT
+	set l([calc_addr 0 0 0x0090]) GICINI
+	set l([calc_addr 0 0 0x0093]) WRTPSG
+	set l([calc_addr 0 0 0x0096]) RDPSG
+	set l([calc_addr 0 0 0x0099]) STRTMS
+	set l([calc_addr 0 0 0x009c]) CHSNS
+	set l([calc_addr 0 0 0x009f]) CHGET
+	set l([calc_addr 0 0 0x00a2]) CHPUT
+	set l([calc_addr 0 0 0x00a5]) LPTOUT
+	set l([calc_addr 0 0 0x00a8]) LPTSTT
+	set l([calc_addr 0 0 0x00ab]) CNVCHR
+	set l([calc_addr 0 0 0x00ae]) PINLIN
+	set l([calc_addr 0 0 0x00b1]) INLIN
+	set l([calc_addr 0 0 0x00b4]) QINLIN
+	set l([calc_addr 0 0 0x00b7]) BREAKX
+	set l([calc_addr 0 0 0x00ba]) ISCNTC
+	set l([calc_addr 0 0 0x00bd]) CKCNTC
+	set l([calc_addr 0 0 0x00c0]) BEEP
+	set l([calc_addr 0 0 0x00c3]) CLS
+	set l([calc_addr 0 0 0x00c6]) POSIT
+	set l([calc_addr 0 0 0x00c9]) FNKSB
+	set l([calc_addr 0 0 0x00cc]) ERAFNK
+	set l([calc_addr 0 0 0x00cf]) DSPFNK
+	set l([calc_addr 0 0 0x00d2]) TOTEXT
+	set l([calc_addr 0 0 0x00d5]) GTSTCK
+	set l([calc_addr 0 0 0x00d8]) GTTRIG
+	set l([calc_addr 0 0 0x00db]) GTPAD
+	set l([calc_addr 0 0 0x00de]) GTPDL
+	set l([calc_addr 0 0 0x00e1]) TAPION
+	set l([calc_addr 0 0 0x00e4]) TAPIN
+	set l([calc_addr 0 0 0x00e7]) TAPIOF
+	set l([calc_addr 0 0 0x00ea]) TAPOON
+	set l([calc_addr 0 0 0x00ed]) TAPOUT
+	set l([calc_addr 0 0 0x00f0]) TAPOOF
+	set l([calc_addr 0 0 0x00f3]) STMOTR
+	set l([calc_addr 0 0 0x00f6]) LFTQ
+	set l([calc_addr 0 0 0x00f9]) PUTQ
+	set l([calc_addr 0 0 0x00fc]) RIGHTC
+	set l([calc_addr 0 0 0x00ff]) LEFTC
+	set l([calc_addr 0 0 0x0102]) UPC
+	set l([calc_addr 0 0 0x0105]) TUPC
+	set l([calc_addr 0 0 0x0108]) DOWNC
+	set l([calc_addr 0 0 0x010b]) TDOWNC
+	set l([calc_addr 0 0 0x010e]) SCALXY
+	set l([calc_addr 0 0 0x0111]) MAPXY
+	set l([calc_addr 0 0 0x0114]) FETCH
+	set l([calc_addr 0 0 0x0117]) STOREC
+	set l([calc_addr 0 0 0x011a]) SETATR
+	set l([calc_addr 0 0 0x011d]) READC
+	set l([calc_addr 0 0 0x0120]) SETC
+	set l([calc_addr 0 0 0x0123]) NSETCX
+	set l([calc_addr 0 0 0x0126]) GTASPC
+	set l([calc_addr 0 0 0x0129]) PNTINI
+	set l([calc_addr 0 0 0x012c]) SCANR
+	set l([calc_addr 0 0 0x012f]) SCANL
+	set l([calc_addr 0 0 0x0132]) CHGCAP
+	set l([calc_addr 0 0 0x0135]) CHGSND
+	set l([calc_addr 0 0 0x0138]) RSLREG
+	set l([calc_addr 0 0 0x013b]) WSLREG
+	set l([calc_addr 0 0 0x013e]) RDVDP
+	set l([calc_addr 0 0 0x0141]) SNSMAT
+	set l([calc_addr 0 0 0x0144]) PHYDIO
+	set l([calc_addr 0 0 0x0147]) FORMAT
+	set l([calc_addr 0 0 0x014a]) ISFLIO
+	set l([calc_addr 0 0 0x014d]) OUTDLP
+	set l([calc_addr 0 0 0x0150]) GETVCP
+	set l([calc_addr 0 0 0x0153]) GETVC2
+	set l([calc_addr 0 0 0x0156]) KILBUF
+	set l([calc_addr 0 0 0x0159]) CALBAS
 }
 
 namespace export codeanalyzer
