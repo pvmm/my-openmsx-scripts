@@ -538,6 +538,12 @@ proc analyze_code {pc} {
 		set next [expr $fullpc + 2] ;# next instruction in adjacent memory
 		tag_decoded $next lookup_or_create
 	}
+	# tag conditional relative returns as CODE
+	if {[lsearch -exact [list 192 200 208 216 224 232 240 248] [peek $pc]] >= 0} {
+		log "analyze_code started: relative conditional return detected at [format %04x $fullpc]"
+		set next [expr $fullpc + 1] ;# next instruction in adjacent memory
+		tag_decoded $next lookup_or_create
+	}
 	# tag conditional absolute branches as CODE
 	if {[lsearch -exact [list 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] [peek $pc]] >= 0} {
 		log "analyze_code started: absolute conditional branch detected at [format %04x $fullpc]"
