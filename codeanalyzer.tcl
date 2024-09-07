@@ -478,15 +478,11 @@ proc tag_address {fulladdr {name {}}} {
 }
 
 # tag PC with extra information on memory access
-proc tag_extra {fullpc fulladdr aaa} {
+proc tag_extra {fullpc fulladdr {tmp {}}} {
 	variable x
 	if {[array get x $fullpc] eq {}} {
-		log "tag slot and subslot for [format %04x $fullpc]: [format %04x $fulladdr], $aaa"
+		log "tag slot and subslot for [format %04x $fullpc]: [format %04x $fulladdr], $tmp"
 		set x($fullpc) $fulladdr
-		if {[expr $fullpc == 0x99440c9] eq 1} {
-			set error "hit it! [format %04x $fulladdr]"
-			error $error
-		}
 	}
 }
 
