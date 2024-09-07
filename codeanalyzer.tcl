@@ -1,10 +1,10 @@
 namespace eval codeanalyzer {
 
 # TODO:
+# * detect when interrupt routine is called;
 # * finish all z80 instructions;
 #   ** INI,IND,INIR,INDR,OUTI,OUTIR,OUTD,OUTDR
-#   ** explore conditional branches (specially when the PC goes the other way)
-# * BIOS support;
+# * full BIOS support;
 # * detect ROM size (16k, 32k or MEGAROM);
 # * detect segment type (ROM or memory mapper) and usage when executing code or reading/writing data;
 # * detect code copying to RAM and include it in the analysis;
@@ -44,8 +44,13 @@ variable start_point {}
 variable entry_point {}
 variable end_point 0xBFFF ;# end of page 2
 variable comment "" ;# stored comment message
-variable _rr 0 ;# (R)eal (R)ead
+variable rr 0 ;# (R)eal (R)ead flag
 variable label_size 14
+variable error {} ;# error propagation
+
+variable hkeyi_wp ;# HKEYI watchpoint
+variable hkeyi {} ;# HKEYI routine address
+variable intpc 0  ;# interrupted PC address
 
 # bookkeeping
 variable oldpc {}
@@ -62,6 +67,7 @@ proc NAUGHT	{} { return {}}
 proc CODE	{} { return 1 }
 proc DATA	{} { return 2 }
 proc BOTH	{} { return 3 }
+proc HKEY_HOOK  {} { return 64924 } ;# last position of HKEY (0xfd9c)
 
 set_help_proc codeanalyzer [namespace code codeanalyzer_help]
 proc codeanalyzer_help {args} {
@@ -209,6 +215,7 @@ proc codeanalyzer_start {args} {
 	variable r_wp
 	variable w_wp
 	variable is_mapper
+	variable hkeyi_wp
 
 	if {$args eq {} || [llength $args] > 2} {
 		error "wrong # args: should be slot ?subslot?"
@@ -237,13 +244,23 @@ proc codeanalyzer_start {args} {
 		if {$entry_point eq ""} {
 			codeanalyzer_scancart
 		}
-		set r_wp [debug set_watchpoint read_mem  {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_read_mem ]
-		set w_wp [debug set_watchpoint write_mem {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_write_mem]
+		set r_wp     [debug set_watchpoint read_mem  {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_read_mem   ]
+		set w_wp     [debug set_watchpoint write_mem {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_write_mem  ]
+		set hkeyi_wp [debug set_watchpoint write_mem {0xfd9a 0xfd9c} {}                     codeanalyzer::_write_hkeyi]
 	} else {
 		puts "Nothing to start."
 	}
 
 	return ;# no output
+}
+
+# detect write to HKEYI system hook
+proc _write_hkeyi {} {
+	if {$::wp_last_address eq [HKEY_HOOK]} {
+		variable hkeyi
+		set hkeyi [get_slotaddr [peek16 [expr $::wp_last_address - 1]]]
+		log "HKEYI set to $hkeyi"
+	}
 }
 
 proc codeanalyzer_stop {} {
@@ -253,8 +270,10 @@ proc codeanalyzer_stop {} {
 		puts "Codeanalyzer stopped."
 		debug remove_watchpoint $r_wp
 		debug remove_watchpoint $w_wp
+		debug remove_watchpoint $hkeyi_wp
 		set r_wp ""
 		set w_wp ""
+		set hkeyi_wp ""
 	} else {
 		puts "Nothing to stop."
 	}
@@ -318,8 +337,10 @@ proc codeanalyzer_info {} {
 	variable CODE_recs
 	variable BOTH_recs
 	variable r_wp
+	variable hkeyi
 
 	puts "running on slot $ss"
+	puts "HKEYI set to $hkeyi"
 	puts "mapper detection: [expr $is_mapper == 0 ? no : yes]"
 	puts -nonewline "memory type: "
 	if {$mem_type ne ""} {
@@ -457,11 +478,15 @@ proc tag_address {fulladdr {name {}}} {
 }
 
 # tag PC with extra information on memory access
-proc tag_extra {pc fulladdr} {
+proc tag_extra {fullpc fulladdr aaa} {
 	variable x
-	if {[array get x $pc] eq {}} {
-		log "tag slot and subslot for [format %04x $pc]: [format %04x $fulladdr]"
-		set x($pc) $fulladdr
+	if {[array get x $fullpc] eq {}} {
+		log "tag slot and subslot for [format %04x $fullpc]: [format %04x $fulladdr], $aaa"
+		set x($fullpc) $fulladdr
+		if {[expr $fullpc == 0x99440c9] eq 1} {
+			set error "hit it! [format %04x $fulladdr]"
+			error $error
+		}
 	}
 }
 
@@ -474,7 +499,7 @@ proc lookup_or_create {addr} {
 	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc" }
 
 	set fulladdr [get_curraddr $addr]
-	tag_extra $tmp_pc $fulladdr
+	tag_extra $tmp_pc $fulladdr 1
 	# return BIOS address only
 	set lbl [array get b $fulladdr]
 	if {[llength $lbl] ne 0} {
@@ -489,34 +514,40 @@ proc lookup_or_create {addr} {
 	return [lindex $lbl 1]
 }
 
-proc _disasm {blob fulladdr lookup} {
+proc _disasm {blob fullpc lookup} {
 	variable tmp_pc
-	set tmp_pc $fulladdr
-	if {[catch {set result [debug disasm_blob $blob $fulladdr $lookup]} fid]} {
-		comment $fulladdr "warning: invalid Z80 code detected"
+	variable error
+	set tmp_pc $fullpc
+	#set result [debug disasm_blob $blob $fullpc $lookup]
+	#return $result
+	set error {}
+	if {[catch {set result [debug disasm_blob $blob $fullpc $lookup]} fid]} {
+		comment $fullpc $fid
 		set result "db     "
 		for {set i 0} {$i < [string length $blob]} {incr i} {
 			append result "#[format %02x [scan [string index $blob $i] %c]],"
 		}
 		set result [list [string trimright $result ,] 4]
 	}
+	if {$error ne {}} {
+		error $error
+	}
 	return $result
 }
 
-proc disasm_blob {fulladdr lookup} {
-	if {[env DEBUG] ne 0 && $fulladdr eq {}} { error "missing parameter fulladdr" }
-	set blob ""
-	append blob [format %c [peek $fulladdr {slotted memory}]]
-	append blob [format %c [peek [expr $fulladdr + 1] {slotted memory}]]
-	append blob [format %c [peek [expr $fulladdr + 2] {slotted memory}]]
-	append blob [format %c [peek [expr $fulladdr + 3] {slotted memory}]]
-	return [_disasm $blob $fulladdr $lookup]
+proc disasm_blob {fullpc lookup} {
+	if {[env DEBUG] ne 0 && $fullpc eq {}} { error "missing parameter fullpc" }
+	set    blob [format %c [peek $fullpc {slotted memory}]]
+	append blob [format %c [peek [expr $fullpc + 1] {slotted memory}]]
+	append blob [format %c [peek [expr $fullpc + 2] {slotted memory}]]
+	append blob [format %c [peek [expr $fullpc + 3] {slotted memory}]]
+	return [_disasm $blob $fullpc $lookup]
 }
 
-proc tag_decoded {fulladdr lookup} {
-	set len [lindex [disasm_blob $fulladdr $lookup] 1]
+proc tag_decoded {fullpc lookup} {
+	set len [lindex [disasm_blob $fullpc $lookup] 1]
 	for {set i 0} {$i < $len} {incr i} {
-		tag_CODE [expr $fulladdr + $i]
+		tag_CODE [expr $fullpc + $i]
 	}
 }
 
@@ -524,38 +555,54 @@ proc tag_decoded {fulladdr lookup} {
 proc analyze_code {pc} {
 	variable x
 	set fullpc [get_curraddr $pc]
+	set peekpc [peek $pc]
+
 	# already visited?
 	if {[array get x $fullpc] ne {}} {
 		return
 	}
-	# tag conditional relative branches as CODE
-	if {[lsearch -exact [list 16 32 40 48 56] [peek $pc]] >= 0} {
+	if {$peekpc eq 24} {
+		# tag unconditional relative branches as CODE
+		log "analyze_code started: unconditional relative branch detected at [format %04x $fullpc]"
+		set dest [expr $fullpc + [peek_s8 [expr $fullpc + 1] {slotted memory}] + 2]
+		tag_extra $fullpc $dest 2
+		tag_address $dest
+
+	} elseif {[lsearch -exact [list 195 205] $peekpc] >= 0} {
+		# tag unconditional absolute branches as CODE
+		log "analyze_code started: absolute branch detected at [format %04x $fullpc]"
+		set dest [get_curraddr [peek16 [expr $fullpc + 1] {slotted memory}]]
+		tag_extra $fullpc $dest 0
+		tag_address $dest
+
+	} elseif {[lsearch -exact [list 16 32 40 48 56] $peekpc] >= 0} {
+		# tag conditional relative branches as CODE
 		log "analyze_code started: relative conditional branch detected at [format %04x $fullpc]"
-		set dest [expr $fullpc + [peek_s8 [expr $fullpc + 1] {slotted memory}]]
-		tag_extra $fullpc $dest
+		set dest [expr $fullpc + [peek_s8 [expr $fullpc + 1] {slotted memory}] + 2]
+		tag_extra $fullpc $dest 2
 		tag_address $dest
 		tag_decoded $dest lookup_or_create
 		set next [expr $fullpc + 2] ;# next instruction in adjacent memory
 		tag_decoded $next lookup_or_create
-	}
-	# tag conditional relative returns as CODE
-	if {[lsearch -exact [list 192 200 208 216 224 232 240 248] [peek $pc]] >= 0} {
+
+	} elseif {[lsearch -exact [list 192 200 208 216 224 232 240 248] $peekpc] >= 0} {
+		# tag conditional relative returns as CODE
 		log "analyze_code started: relative conditional return detected at [format %04x $fullpc]"
 		set next [expr $fullpc + 1] ;# next instruction in adjacent memory
 		tag_decoded $next lookup_or_create
-	}
-	# tag conditional absolute branches as CODE
-	if {[lsearch -exact [list 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] [peek $pc]] >= 0} {
+
+	} elseif {[lsearch -exact [list 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] $peekpc] >= 0} {
+		# tag conditional absolute branches as CODE
 		log "analyze_code started: absolute conditional branch detected at [format %04x $fullpc]"
 		set dest [get_curraddr [peek16 [expr $fullpc + 1] {slotted memory}]]
-		tag_extra $fullpc $dest
+		tag_extra $fullpc $dest 3
 		tag_address $dest
 		tag_decoded $dest lookup_or_create
 		set next [expr $fullpc + 3] ;# next instruction in adjacent memory
 		tag_decoded $next lookup_or_create
 	}
-	tag_extra $fullpc $fullpc
-	log "analyze_code done"
+	#tag_extra $fullpc $fullpc 4
+	#log "analyze_code done"
 }
 
 # hex or "null"
@@ -566,42 +613,60 @@ proc xe {num {i 4}} {
 	return [format "%0${i}x" $num]
 }
 
+proc tmp {} {
+	# detect hkeyi interrupt routine being called
+	set tmp [array get x $fullpc]
+
+			# detect branch and set label
+			if {$::wp_last_address ne {} && [expr abs($::wp_last_address - $oldpc)] >= 4 && $_rr eq 0} {
+				set oldpc    [get_curraddr $oldpc]
+				set fulladdr [get_curraddr $::wp_last_address]
+				tag_extra $oldpc $fulladdr 6
+				tag_address $fulladdr
+			}
+}
+
 proc _read_mem {} {
 	variable t
+	variable x
 	variable oldpc
 	variable inslen
 	variable last_mem_read
-	variable _rr
+	variable rr
 	variable comment
+	variable hkeyi
+	variable intpc
 
 	set fullpc [get_curraddr [reg PC]]
-	#log "pc: [xe $oldpc] -> [xe $fullpc], read: [xe $::wp_last_address]"
+	if {$fullpc eq $hkeyi && $intpc eq 0} {
+		log "interrupt routine detected"
+		set intpc $oldpc
+	} elseif {[reg PC] eq $intpc} {
+		log "resuming from interrupt routine detected"
+		set intpc 0
+	}
+
+	set int [expr $intpc == 0 ? 0 : 1]
+	log "pc: [xe $oldpc] ([xe $last_mem_read]) -> [xe $fullpc], ([xe $::wp_last_address]), rr$rr, intpc$int"
+
 	# process current instruction
 	if {$oldpc eq [reg PC]} {
 		# detect if ::wp_last_address is still reading instructions
 		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
 			tag_CODE [get_curraddr $::wp_last_address]
-			set _rr 0
+			set rr 0
 		} elseif {$::wp_last_address ne [expr [reg PC]]} {
 			set fulladdr [get_curraddr $::wp_last_address]
-			tag_extra $fullpc $fulladdr
+			tag_extra $fullpc $fulladdr 5
 			tag_address $fulladdr
 			tag_DATA $fulladdr
 			# avoid PC infinite loop
-			set _rr 1
+			set rr 1
 		}
 	} else {
 		# analyze last instruction
-		if {$oldpc ne {}} {
-			analyze_code $oldpc
-			# detect branch and set label
-			if {$::wp_last_address ne {} && [expr abs($::wp_last_address - $oldpc)] >= 4} {
-				set oldpc    [get_curraddr $oldpc]
-				set fulladdr [get_curraddr $::wp_last_address]
-				tag_extra $oldpc $fulladdr
-				tag_address $fulladdr
-			}
-		}
+		if {$oldpc ne {}} { analyze_code $oldpc }
+		set rr 0
 		# start new instruction
 		tag_CODE [get_curraddr [reg PC]]
 		# put comment on new instruction if it exists
@@ -639,25 +704,34 @@ proc lookup {addr} {
 	variable l
 	variable x
 	variable tmp_pc
+	variable error
 	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc \[1\]" }
 
 	#log "\[1\] searching [format %04x $tmp_pc] [format %04x $addr]..."
 	# search extended address information
 	if {[array get x $tmp_pc] ne {}} {
-		set addr $x($tmp_pc)
+		set fulladdr $x($tmp_pc)
+		if {[expr $fulladdr & 0xffff] ne $addr} {
+			set error "error: [format %04x $tmp_pc]: [format %04x $fulladdr] != [format %04x $addr]"
+			return
+		}
+	} else {
+		set fulladdr [get_curraddr $addr]
+		#error "extended address at [format %04x $tmp_pc] not found"
+		#log "error: [format %04x $fulladdr] != [format %04x $addr]"
 	}
 	#log "\[2\] searching [format %04x $addr]..."
 	# return BIOS address
-	set lbl [array get b $addr]
+	set lbl [array get b $fulladdr]
 	if {[llength $lbl] ne 0} {
-		#log "found BIOS entry @[format %04x $addr]: [lindex $lbl 1]"
+		#log "found BIOS entry @[format %04x $fulladdr]: [lindex $lbl 1]"
 		comment $tmp_pc "BIOS access detected"
 		return [lindex $lbl 1]
 	}
 	# return CODE address
-	set lbl [array get l $addr]
+	set lbl [array get l $fulladdr]
 	if {[llength $lbl] ne 0} {
-		#log "found @[format %04x $addr]: [lindex $lbl 1]"
+		#log "found @[format %04x $fulladdr]: [lindex $lbl 1]"
 		return [lindex $lbl 1]
 	}
 	return ""
@@ -863,6 +937,7 @@ proc load_bios {} {
 	set b([calc_addr 0 0 0x0153]) GETVC2
 	set b([calc_addr 0 0 0x0156]) KILBUF
 	set b([calc_addr 0 0 0x0159]) CALBAS
+	set b([calc_addr 3 0 0xfd9a]) HKEYI
 }
 
 namespace export codeanalyzer
