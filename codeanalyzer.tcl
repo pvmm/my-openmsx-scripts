@@ -548,10 +548,9 @@ proc tag_decoded {fullpc lookup} {
 }
 
 # Detect functions, branches, BIOS calls etc.
-proc analyze_code {pc} {
+proc analyze_opcode {fullpc} {
 	variable x
-	set fullpc [get_curraddr $pc]
-	set peekpc [peek $pc]
+	set peekpc [peek $fullpc {slotted memory}]
 
 	# already visited?
 	if {[array get x $fullpc] ne {}} {
@@ -559,21 +558,21 @@ proc analyze_code {pc} {
 	}
 	if {$peekpc eq 24} {
 		# tag unconditional relative branches as CODE
-		log "analyze_code started: unconditional relative branch detected at [format %04x $fullpc]"
+		log "analyze_opcode started: unconditional relative branch detected at [format %04x $fullpc]"
 		set dest [expr $fullpc + [peek_s8 [expr $fullpc + 1] {slotted memory}] + 2]
 		tag_extra $fullpc $dest 2
 		tag_address $dest
 
 	} elseif {[lsearch -exact [list 195 205] $peekpc] >= 0} {
 		# tag unconditional absolute branches as CODE
-		log "analyze_code started: absolute branch detected at [format %04x $fullpc]"
+		log "analyze_opcode started: absolute branch detected at [format %04x $fullpc]"
 		set dest [get_curraddr [peek16 [expr $fullpc + 1] {slotted memory}]]
 		tag_extra $fullpc $dest 0
 		tag_address $dest
 
 	} elseif {[lsearch -exact [list 16 32 40 48 56] $peekpc] >= 0} {
 		# tag conditional relative branches as CODE
-		log "analyze_code started: relative conditional branch detected at [format %04x $fullpc]"
+		log "analyze_opcode started: relative conditional branch detected at [format %04x $fullpc]"
 		set dest [expr $fullpc + [peek_s8 [expr $fullpc + 1] {slotted memory}] + 2]
 		tag_extra $fullpc $dest 2
 		tag_address $dest
@@ -583,13 +582,13 @@ proc analyze_code {pc} {
 
 	} elseif {[lsearch -exact [list 192 200 208 216 224 232 240 248] $peekpc] >= 0} {
 		# tag conditional relative returns as CODE
-		log "analyze_code started: relative conditional return detected at [format %04x $fullpc]"
+		log "analyze_opcode started: relative conditional return detected at [format %04x $fullpc]"
 		set next [expr $fullpc + 1] ;# next instruction in adjacent memory
 		tag_decoded $next lookup_or_create
 
 	} elseif {[lsearch -exact [list 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] $peekpc] >= 0} {
 		# tag conditional absolute branches as CODE
-		log "analyze_code started: absolute conditional branch detected at [format %04x $fullpc]"
+		log "analyze_opcode started: absolute conditional branch detected at [format %04x $fullpc]"
 		set dest [get_curraddr [peek16 [expr $fullpc + 1] {slotted memory}]]
 		tag_extra $fullpc $dest 3
 		tag_address $dest
@@ -598,7 +597,7 @@ proc analyze_code {pc} {
 		tag_decoded $next lookup_or_create
 	}
 	#tag_extra $fullpc $fullpc 4
-	#log "analyze_code done"
+	#log "analyze_opcode done"
 }
 
 # hex or "null"
@@ -661,7 +660,7 @@ proc _read_mem {} {
 		}
 	} else {
 		# analyze last instruction
-		if {$oldpc ne {}} { analyze_code $oldpc }
+		if {$oldpc ne {}} { analyze_opcode [get_curraddr $oldpc] }
 		set rr 0
 		# start new instruction
 		tag_CODE [get_curraddr [reg PC]]
