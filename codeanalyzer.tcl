@@ -247,6 +247,8 @@ proc codeanalyzer_start {args} {
 		set r_wp     [debug set_watchpoint read_mem  {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_read_mem   ]
 		set w_wp     [debug set_watchpoint write_mem {0x0000 0xffff} "\[pc_in_slot $slot\]" codeanalyzer::_write_mem  ]
 		set hkeyi_wp [debug set_watchpoint write_mem {0xfd9a 0xfd9c} {}                     codeanalyzer::_write_hkeyi]
+		# detect BIOS call
+		set bios_wp  [debug set_watchpoint read_mem  {0x0008 0x0159} "\[pc_in_slot 0\]"     codeanalyzer::_read_bios  ]
 	} else {
 		puts "Nothing to start."
 	}
@@ -619,6 +621,66 @@ proc tmp {} {
 				tag_extra $oldpc $fulladdr 6
 				tag_address $fulladdr
 			}
+}
+
+proc _read_bios {} {
+	if {$::wp_last_address ne [reg PC]} { return }
+
+	variable b
+	set bcall [array get b $::wp_last_address]
+	#set bcall [array get b [reg PC]]
+	if {$bcall ne {}} { log "analyzing BIOS call... [lindex $bcall 1]" }
+
+	switch [lindex $bcall 1] {
+		RDVDP { ;# read VDP status register
+			set reg [reg A]
+			log "reading vdp r#$reg"
+		}
+		WRTVDP { ;# write VDP status register
+			set byte [reg B]
+			set reg  [reg C]
+			log "writing $byte -> vdp r#$reg"
+		}
+		RDVRM { ;# read data to VRAM
+			set vaddr [reg HL]
+			log "reading vaddr0x[format %04x $vaddr]"
+		}
+		WRTVRM { ;# write data to VRAM
+			set vaddr [reg HL]
+			set byte  [reg A]
+			log "writing byte[format %02x $byte] -> vaddr0x[format %04x $vaddr]"
+		}
+		FILVRM { ;# fill VRAM
+			set byte  [reg A]
+			set len   [reg BC]
+			set vaddr [reg HL]
+			log "writing byte[format %02x $byte] len$len -> vaddr0x[format %04x $vaddr]"
+		}
+		LDIRVM { ;# to VRAM from memory
+			set len   [reg BC]
+			set vaddr [reg DE]
+			set addr  [reg HL]
+			log "writing len$len addr0x[format %04x $vaddr] -> vaddr0x[format %04x $addr]"
+		}
+		LDIRMV { ;# to memory from VRAM
+			set len   [reg BC]
+			set addr  [reg DE]
+			set vaddr [reg HL]
+			log "writing len$len vaddr0x[format %04x $vaddr] -> addr0x[format %04x $addr]"
+		}
+		SETRD  { ;# set VDP address to read
+			set vaddr [reg HL]
+			log "vaddr0x[format %04x $vaddr]"
+		}
+		SETWRT { ;# set VDP address to write
+			set vaddr [reg HL]
+			log "vaddr0x[format %04x $vaddr]"
+		}
+		SNSMAT { ;# read keyboard matrix
+			set line [reg A]
+			log "reading keyboard matrix line $line"
+		}
+	}
 }
 
 proc _read_mem {} {
