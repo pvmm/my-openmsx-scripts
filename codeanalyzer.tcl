@@ -1007,7 +1007,15 @@ proc load_bios {} {
 	set b([calc_addr 0 0 0x0153]) GETVC2
 	set b([calc_addr 0 0 0x0156]) KILBUF
 	set b([calc_addr 0 0 0x0159]) CALBAS
-	set b([calc_addr 3 0 0xfd9a]) HKEYI
+	set b([calc_addr 3 0 0xfc4a]) HIMEM.1
+	set b([calc_addr 3 0 0xfc4b]) HIMEM.2
+	set b([calc_addr 3 0 0xfcc1]) EXPTBL.1
+	set b([calc_addr 3 0 0xfcc2]) EXPTBL.2
+	set b([calc_addr 3 0 0xfcc3]) EXPTBL.3
+	set b([calc_addr 3 0 0xfcc4]) EXPTBL.4
+	set b([calc_addr 3 0 0xfd9a]) HKEYI.0
+	set b([calc_addr 3 0 0xfd9b]) HKEYI.1
+	set b([calc_addr 3 0 0xfd9c]) HKEYI.2
 }
 
 namespace export codeanalyzer
