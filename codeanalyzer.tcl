@@ -46,6 +46,7 @@ variable end_point 0xBFFF ;# end of page 2
 variable comment "" ;# stored comment message
 variable rr 0 ;# (R)eal (R)ead flag
 variable label_size 14
+variable cmt_pos    19
 variable error {} ;# error propagation
 
 variable hkeyi_wp ;# HKEYI watchpoint
@@ -492,6 +493,7 @@ proc tag_extra {fullpc fulladdr {tmp {}}} {
 proc lookup_or_create {addr} {
 	variable b
 	variable l
+	variable c
 	variable tmp_pc
 	if {[env DEBUG] ne 0 &&   $addr eq {}} { error "missing parameter addr" }
 	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc" }
@@ -500,7 +502,7 @@ proc lookup_or_create {addr} {
 	tag_extra $tmp_pc $fulladdr 1
 	# return BIOS address only
 	set lbl [array get b $fulladdr]
-	if {[llength $lbl] ne 0} {
+	if {[llength $lbl] ne 0 && [array get c $tmp_pc] eq {}} {
 		comment $tmp_pc "BIOS access detected"
 		return [lindex $lbl 1]
 	}
@@ -516,8 +518,6 @@ proc _disasm {blob fullpc lookup} {
 	variable tmp_pc
 	variable error
 	set tmp_pc $fullpc
-	#set result [debug disasm_blob $blob $fullpc $lookup]
-	#return $result
 	set error {}
 	if {[catch {set result [debug disasm_blob $blob $fullpc $lookup]} fid]} {
 		comment $fullpc $fid
@@ -624,61 +624,68 @@ proc tmp {} {
 }
 
 proc _read_bios {} {
+	variable r_wp
+	if {$r_wp eq ""} { error "codeanalyzer not running yet" }
 	if {$::wp_last_address ne [reg PC]} { return }
+
+	variable x
+	variable oldpc
+	if {$oldpc eq {}} { return }
+	set fullpc [get_curraddr $oldpc]
+	if {[array get x $fullpc] ne {}} { return }
 
 	variable b
 	set bcall [array get b $::wp_last_address]
-	#set bcall [array get b [reg PC]]
-	if {$bcall ne {}} { log "analyzing BIOS call... [lindex $bcall 1]" }
+	if {$bcall ne {}} { log "analyzing BIOS call at [format %04x $oldpc]... [lindex $bcall 1]" }
 
 	switch [lindex $bcall 1] {
 		RDVDP { ;# read VDP status register
 			set reg [reg A]
-			log "reading vdp r#$reg"
+			comment $fullpc "reading vdp register"
 		}
 		WRTVDP { ;# write VDP status register
 			set byte [reg B]
 			set reg  [reg C]
-			log "writing $byte -> vdp r#$reg"
+			comment $fullpc "writing byte to vdp register"
 		}
 		RDVRM { ;# read data to VRAM
 			set vaddr [reg HL]
-			log "reading vaddr0x[format %04x $vaddr]"
+			comment $fullpc "reading vram address"
 		}
 		WRTVRM { ;# write data to VRAM
 			set vaddr [reg HL]
 			set byte  [reg A]
-			log "writing byte[format %02x $byte] -> vaddr0x[format %04x $vaddr]"
+			comment $fullpc "writing byte to VRAM address"
 		}
 		FILVRM { ;# fill VRAM
 			set byte  [reg A]
 			set len   [reg BC]
 			set vaddr [reg HL]
-			log "writing byte[format %02x $byte] len$len -> vaddr0x[format %04x $vaddr]"
+			comment $fullpc "filling vram address"
 		}
 		LDIRVM { ;# to VRAM from memory
 			set len   [reg BC]
 			set vaddr [reg DE]
 			set addr  [reg HL]
-			log "writing len$len addr0x[format %04x $vaddr] -> vaddr0x[format %04x $addr]"
+			comment $fullpc "writing bytes from VRAM to RAM address"
 		}
 		LDIRMV { ;# to memory from VRAM
 			set len   [reg BC]
 			set addr  [reg DE]
 			set vaddr [reg HL]
-			log "writing len$len vaddr0x[format %04x $vaddr] -> addr0x[format %04x $addr]"
+			comment $fullpc "writing byte froms from RAM to VRAM address"
 		}
 		SETRD  { ;# set VDP address to read
 			set vaddr [reg HL]
-			log "vaddr0x[format %04x $vaddr]"
+			comment $fullpc "setting VDP to read"
 		}
 		SETWRT { ;# set VDP address to write
 			set vaddr [reg HL]
-			log "vaddr0x[format %04x $vaddr]"
+			comment $fullpc "setting VDP to write"
 		}
 		SNSMAT { ;# read keyboard matrix
 			set line [reg A]
-			log "reading keyboard matrix line $line"
+			comment $fullpc "reading keyboard matrix"
 		}
 	}
 }
@@ -703,8 +710,8 @@ proc _read_mem {} {
 		set intpc 0
 	}
 
-	set int [expr $intpc == 0 ? 0 : 1]
-	log "pc: [xe $oldpc] ([xe $last_mem_read]) -> [xe $fullpc], ([xe $::wp_last_address]), rr$rr, intpc$int"
+	#set int [expr $intpc == 0 ? 0 : 1]
+	#log "pc: [xe $oldpc] ([xe $last_mem_read]) -> [xe $fullpc], ([xe $::wp_last_address]), rr$rr, intpc$int"
 
 	# process current instruction
 	if {$oldpc eq [reg PC]} {
@@ -739,21 +746,23 @@ proc _write_mem {} {
 
 proc label_fmt {label} {
 	variable label_size
-	if {$label ne ""} { set label "$label:" }
+	if {$label ne ""} { set label $label: }
 	set size [expr $label_size - [string len $label]]
-	if {$size > 0} {
-		return $label[string repeat " " $size]
+	if {$size < 0} {
+		return "$label\n[string repeat "Y" $label_size]"
 	}
-	return "$label\n[string repeat " " $label_size]"
+	return $label[string repeat " " $size]
 }
 
-proc disasm_fmt {label asm comment} {
+proc disasm_fmt {label asm {comment ""}} {
+	variable cmt_pos
 	if {$comment eq ""} {
-		set suffix $asm
+		set suffix  [format %${cmt_pos}s $asm]
 	} else {
-		set suffix "[format %20s $asm] ; $comment"
+		set suffix "[format %${cmt_pos}s $asm] ; $comment"
 	}
-	return [label_fmt $label]$suffix
+	set line [label_fmt $label]$suffix
+	return $line
 }
 
 proc lookup {addr} {
@@ -781,8 +790,11 @@ proc lookup {addr} {
 	# return BIOS address
 	set lbl [array get b $fulladdr]
 	if {[llength $lbl] ne 0} {
+		variable c
 		#log "found BIOS entry @[format %04x $fulladdr]: [lindex $lbl 1]"
-		comment $tmp_pc "BIOS access detected"
+		if {[array get c $tmp_pc] eq {}} {
+			comment $tmp_pc "BIOS access detected"
+		}
 		return [lindex $lbl 1]
 	}
 	# return CODE address
@@ -803,8 +815,9 @@ proc disasm {source_file fulladdr blob {byte {}}} {
 		if {$byte eq {}} {
 			set asm [_disasm $blob $fulladdr lookup]
 		} else {
-			set asm [list "db     #[format %02x $byte]" 1]
+			set asm [list "db     #[format %02x $byte]         " 1]
 		}
+		# remove processed data from blob
 		set blob [string range $blob [lindex $asm 1] end]
 		set lbl  [array get l $fulladdr]
 		set cmt  [array get c $fulladdr]
