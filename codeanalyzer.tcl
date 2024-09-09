@@ -294,11 +294,11 @@ proc _scancart {} {
 		set prefix [format %c%c [expr $tmp & 0xff] [expr $tmp >> 8]]
 		if {$prefix eq "AB"} {
 			set mem_type ROM
-			puts "prefix found at $ss:[format %04x [expr $addr & 0xffff]]"
+			puts "prefix found at $ss:[xn [expr $addr & 0xffff]]"
 			set start_point $offset
 			set entry_point [peek16 [expr $addr + 2] {slotted memory}]
-			puts "start point found at [format %04x $start_point]"
-			puts "entry point found at [format %04x $entry_point]"
+			puts "start point found at [xn $start_point]"
+			puts "entry point found at [xn $entry_point]"
 		}
 	}
 	if {$start_point eq ""} {
@@ -353,13 +353,13 @@ proc codeanalyzer_info {} {
 	}
 	puts -nonewline "start point: "
 	if {$start_point ne {}} {
-		puts [format %04x $start_point]
+		puts [xn $start_point]
 	} else {
 		puts "undefined"
 	}
 	puts -nonewline "entry point: "
 	if {$entry_point ne {}} {
-		puts [format %04x $entry_point]
+		puts [xn $entry_point]
 	} else {
 		puts "undefined"
 	}
@@ -399,11 +399,11 @@ proc tag_DATA {fulladdr} {
 	if {$type eq [NAUGHT]} {
 		set t($fulladdr) [DATA]
 		if {[env LOGLEVEL] eq 1} {
-			log "tagging [format %04x $fulladdr] as DATA"
+			log "tagging [xn $fulladdr] as DATA"
 		}
 		incr DATA_recs
 	} elseif {$t($fulladdr) eq [CODE]} {
-		log "warning: overwritting address type in [format %04x $fulladdr] from CODE to BOTH"
+		log "warning: overwritting address type in [xn $fulladdr] from CODE to BOTH"
 		set t($fulladdr) [BOTH]
 		incr CODE_recs -1
 		incr BOTH_recs
@@ -420,12 +420,12 @@ proc tag_CODE {fulladdr} {
 	set type [array get t $fulladdr]
 	if {$type eq [NAUGHT]} {
 		if {[env LOGLEVEL] eq 1} {
-			log "tagging [format %04x $fulladdr] as CODE"
+			log "tagging [xn $fulladdr] as CODE"
 		}
 		set t($fulladdr) [CODE]
 		incr CODE_recs
 	} elseif {$t($fulladdr) eq [DATA]} {
-		log "warning: overwritting address type in [format %04x $fulladdr] from DATA to BOTH"
+		log "warning: overwritting address type in [xn $fulladdr] from DATA to BOTH"
 		set t($fulladdr) [BOTH]
 		incr DATA_recs -1
 		incr BOTH_recs
@@ -470,11 +470,11 @@ proc tag_address {fulladdr {name {}}} {
 		if {[llength $syms] > 0} {
 			set sym [lindex $syms 0]
 			set name [lindex $sym 3]
-			log "[format %04x $fulladdr]: found symbol $name"
+			log "[xn $fulladdr]: found symbol $name"
 			set l($fulladdr) $name
 		} elseif {$lbl eq [NAUGHT]} {
 			set name [labelfy $fulladdr]
-			log "[format %04x $fulladdr]: address tagged with new name $name."
+			log "[xn $fulladdr]: address tagged with new name $name."
 			set l($fulladdr) $name
 		}
 	}
@@ -484,7 +484,7 @@ proc tag_address {fulladdr {name {}}} {
 proc tag_extra {fullpc fulladdr {tmp {}}} {
 	variable x
 	if {[array get x $fullpc] eq {}} {
-		log "tag slot and subslot for [format %04x $fullpc]: [format %04x $fulladdr], $tmp"
+		log "tag slot and subslot for [xn $fullpc]: [xn $fulladdr], $tmp"
 		set x($fullpc) $fulladdr
 	}
 }
@@ -560,21 +560,21 @@ proc analyze_opcode {fullpc} {
 	}
 	if {$peekpc eq 24} {
 		# tag unconditional relative branches as CODE
-		log "analyze_opcode started: unconditional relative branch detected at [format %04x $fullpc]"
+		log "analyze_opcode started: unconditional relative branch detected at [xn $fullpc]"
 		set dest [expr $fullpc + [peek_s8 [expr $fullpc + 1] {slotted memory}] + 2]
 		tag_extra $fullpc $dest 2
 		tag_address $dest
 
 	} elseif {[lsearch -exact [list 195 205] $peekpc] >= 0} {
 		# tag unconditional absolute branches as CODE
-		log "analyze_opcode started: absolute branch detected at [format %04x $fullpc]"
+		log "analyze_opcode started: absolute branch detected at [xn $fullpc]"
 		set dest [get_curraddr [peek16 [expr $fullpc + 1] {slotted memory}]]
 		tag_extra $fullpc $dest 0
 		tag_address $dest
 
 	} elseif {[lsearch -exact [list 16 32 40 48 56] $peekpc] >= 0} {
 		# tag conditional relative branches as CODE
-		log "analyze_opcode started: relative conditional branch detected at [format %04x $fullpc]"
+		log "analyze_opcode started: relative conditional branch detected at [xn $fullpc]"
 		set dest [expr $fullpc + [peek_s8 [expr $fullpc + 1] {slotted memory}] + 2]
 		tag_extra $fullpc $dest 2
 		tag_address $dest
@@ -584,13 +584,13 @@ proc analyze_opcode {fullpc} {
 
 	} elseif {[lsearch -exact [list 192 200 208 216 224 232 240 248] $peekpc] >= 0} {
 		# tag conditional relative returns as CODE
-		log "analyze_opcode started: relative conditional return detected at [format %04x $fullpc]"
+		log "analyze_opcode started: relative conditional return detected at [xn $fullpc]"
 		set next [expr $fullpc + 1] ;# next instruction in adjacent memory
 		tag_decoded $next lookup_or_create
 
 	} elseif {[lsearch -exact [list 194 196 202 204 210 212 218 220 226 228 234 236 242 244 250 252] $peekpc] >= 0} {
 		# tag conditional absolute branches as CODE
-		log "analyze_opcode started: absolute conditional branch detected at [format %04x $fullpc]"
+		log "analyze_opcode started: absolute conditional branch detected at [xn $fullpc]"
 		set dest [get_curraddr [peek16 [expr $fullpc + 1] {slotted memory}]]
 		tag_extra $fullpc $dest 3
 		tag_address $dest
@@ -603,7 +603,7 @@ proc analyze_opcode {fullpc} {
 }
 
 # hex or "null"
-proc xe {num {i 4}} {
+proc xn {num {i 4}} {
 	if {$num eq ""} {
 		return "ø"
 	}
@@ -636,7 +636,7 @@ proc _read_bios {} {
 
 	variable b
 	set bcall [array get b $::wp_last_address]
-	if {$bcall ne {}} { log "analyzing BIOS call at [format %04x $oldpc]... [lindex $bcall 1]" }
+	if {$bcall ne {}} { log "analyzing BIOS call at [xn $oldpc]... [lindex $bcall 1]" }
 
 	switch [lindex $bcall 1] {
 		RDVDP { ;# read VDP status register
@@ -711,7 +711,7 @@ proc _read_mem {} {
 	}
 
 	#set int [expr $intpc == 0 ? 0 : 1]
-	#log "pc: [xe $oldpc] ([xe $last_mem_read]) -> [xe $fullpc], ([xe $::wp_last_address]), rr$rr, intpc$int"
+	#log "pc: [xn $oldpc] ([xn $last_mem_read]) -> [xn $fullpc], ([xn $::wp_last_address]), rr$rr, intpc$int"
 
 	# process current instruction
 	if {$oldpc eq [reg PC]} {
@@ -773,25 +773,25 @@ proc lookup {addr} {
 	variable error
 	if {[env DEBUG] ne 0 && $tmp_pc eq {}} { error "missing parameter tmp_pc \[1\]" }
 
-	#log "\[1\] searching [format %04x $tmp_pc] [format %04x $addr]..."
+	#log "\[1\] searching [xn $tmp_pc] [xn $addr]..."
 	# search extended address information
 	if {[array get x $tmp_pc] ne {}} {
 		set fulladdr $x($tmp_pc)
 		if {[expr $fulladdr & 0xffff] ne $addr} {
-			set error "error: [format %04x $tmp_pc]: [format %04x $fulladdr] != [format %04x $addr]"
+			set error "error: [xn $tmp_pc]: [xn $fulladdr] != [xn $addr]"
 			return
 		}
 	} else {
 		set fulladdr [get_curraddr $addr]
-		#error "extended address at [format %04x $tmp_pc] not found"
-		#log "error: [format %04x $fulladdr] != [format %04x $addr]"
+		#error "extended address at [xn $tmp_pc] not found"
+		#log "error: [xn $fulladdr] != [xn $addr]"
 	}
-	#log "\[2\] searching [format %04x $addr]..."
+	#log "\[2\] searching [xn $addr]..."
 	# return BIOS address
 	set lbl [array get b $fulladdr]
 	if {[llength $lbl] ne 0} {
 		variable c
-		#log "found BIOS entry @[format %04x $fulladdr]: [lindex $lbl 1]"
+		#log "found BIOS entry @[xn $fulladdr]: [lindex $lbl 1]"
 		if {[array get c $tmp_pc] eq {}} {
 			comment $tmp_pc "BIOS access detected"
 		}
@@ -800,7 +800,7 @@ proc lookup {addr} {
 	# return CODE address
 	set lbl [array get l $fulladdr]
 	if {[llength $lbl] ne 0} {
-		#log "found @[format %04x $fulladdr]: [lindex $lbl 1]"
+		#log "found @[xn $fulladdr]: [lindex $lbl 1]"
 		return [lindex $lbl 1]
 	}
 	return ""
