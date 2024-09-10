@@ -623,6 +623,41 @@ proc tmp {} {
 			}
 }
 
+proc read_pnt {} {
+	set mask [expr [get_screen_mode] == 2 ? 0b01111111 : 0b11111111]
+	return [expr ([vdpreg 2] & $mask) * 0x400]
+}
+
+proc read_ct {} {
+	set mask [expr [get_screen_mode] == 2 ? 0b10000000 : 0b11111111]
+	return [expr (([vdpreg 3] & $mask) << 5) + ([vdpreg 10] << 10) * 0x40]
+}
+
+proc read_pgt {} {
+	set mask [expr [get_screen_mode] == 2 ? 0b00000100 : 0b00111111]
+	return [expr ([vdpreg 4] & $mask) * 0x800]
+}
+
+proc read_sat {} {
+	if {[get_screen_mode] > 3} {
+		return [expr ((([vdpreg 5] | 0b00000100) & 0b11111100) + (([vdpreg 11] & 0b00000011) << 8)) * 0x80]
+	} else {
+		return [expr ([vdpreg 5] & 0b01111111) * 0x80]
+	}
+}
+
+proc read_spt {} {
+	if {[get_screen_mode] > 3} {
+		return [expr ([vdpreg 6] & 0b00111111) * 0x800]
+	} elseif {[get_screen_mode] > 0} {
+		return [expr ([vdpreg 6] & 0b00000111) * 0x800]
+	}
+}
+
+proc read_sct {} {
+	return [expr [read_spt] - 0x200]
+}
+
 proc _read_bios {} {
 	variable r_wp
 	if {$r_wp eq ""} { error "codeanalyzer not running yet" }
