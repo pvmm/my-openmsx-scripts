@@ -610,52 +610,88 @@ proc xn {num {i 4}} {
 	return [format "%0${i}x" $num]
 }
 
-proc tmp {} {
-	# detect hkeyi interrupt routine being called
-	set tmp [array get x $fullpc]
-
-			# detect branch and set label
-			if {$::wp_last_address ne {} && [expr abs($::wp_last_address - $oldpc)] >= 4 && $_rr eq 0} {
-				set oldpc    [get_curraddr $oldpc]
-				set fulladdr [get_curraddr $::wp_last_address]
-				tag_extra $oldpc $fulladdr 6
-				tag_address $fulladdr
-			}
-}
-
+# pattern name table location
 proc read_pnt {} {
-	set mask [expr [get_screen_mode] == 2 ? 0b01111111 : 0b11111111]
-	return [expr ([vdpreg 2] & $mask) * 0x400]
+	set mode [get_screen_mode]
+	if {$mode eq 1} {
+		return [list [expr ([vdpreg 2] & 0b01111111) * 0x400] 256 PNT]
+	} elseif {$mode eq 2} {
+		return [list [expr ([vdpreg 2] & 0b01111111) * 0x400] 768 PNT]
+	} elseif {$mode eq 4} {
+		return [list [expr ([vdpreg 2] & 0b11111111) * 0x400] 1024 PNT]
+	}
+	# out of reach
+	return [list 0x20000 0 PNT]
 }
 
+# colour table location
 proc read_ct {} {
-	set mask [expr [get_screen_mode] == 2 ? 0b10000000 : 0b11111111]
-	return [expr (([vdpreg 3] & $mask) << 5) + ([vdpreg 10] << 10) * 0x40]
+	set mode [get_screen_mode]
+	if {$mode eq 2} {
+		return [list [expr ([vdpreg 3] & 0b10000000) * 0x800] 6144 CT]
+	} elseif {$mode eq 4} {
+		return [list [expr ([vdpreg 3] * 0x800] 8192 CT]
+	}
+	# out of reach
+	return [list 0x20000 0 CT]
 }
 
+# pattern generator table location
 proc read_pgt {} {
-	set mask [expr [get_screen_mode] == 2 ? 0b00000100 : 0b00111111]
-	return [expr ([vdpreg 4] & $mask) * 0x800]
+	set mode [get_screen_mode]
+	if {$mode eq 2} {
+		return [list [expr ([vdpreg 4] & 0b00000100) * 0x800] 6144 PGT]
+	} elseif {$mode eq 4} {
+		return [list [expr ([vdpreg 4] & 0b00111111) * 0x800] 8192 PGT]
+	}
+	# out of reach
+	return [list 0x20000 0 PGT]
 }
 
+# sprite attribute table location
 proc read_sat {} {
-	if {[get_screen_mode] > 3} {
-		return [expr ((([vdpreg 5] | 0b00000100) & 0b11111100) + (([vdpreg 11] & 0b00000011) << 8)) * 0x80]
-	} else {
-		return [expr ([vdpreg 5] & 0b01111111) * 0x80]
+	set mode [get_screen_mode]
+	if {$mode > 3} {
+		return [list [expr ((([vdpreg 5] | 0b00000100) & 0b11111100) + (([vdpreg 11] & 0b00000011) << 8)) * 0x80] 128 SAT]
+	} elseif {$mode > 0} {
+		return [list [expr ([vdpreg 5] & 0b01111111) * 0x80] 128 SAT]
 	}
+	# out of reach
+	return [list 0x20000 0 SAT]
 }
 
+# sprite pattern table location
 proc read_spt {} {
-	if {[get_screen_mode] > 3} {
-		return [expr ([vdpreg 6] & 0b00111111) * 0x800]
-	} elseif {[get_screen_mode] > 0} {
-		return [expr ([vdpreg 6] & 0b00000111) * 0x800]
+	set mode [get_screen_mode]
+	if {$mode > 3} {
+		return [list [expr ([vdpreg 6] & 0b00111111) * 0x800] 2048 SPT]
+	} elseif {$mode > 0} {
+		return [list [expr ([vdpreg 6] & 0b00000111) * 0x800] 2048 SPT]
 	}
+	# out of reach
+	return [list 0x20000 0 SPT]
 }
 
+# sprite colour table location
 proc read_sct {} {
-	return [expr [read_spt] - 0x200]
+	if {[get_screen_mode] > 3} {
+		return [list [expr ([vdpreg 6] & 0b00000111) * 0x800] 2048 SCT]
+	}
+	# out of reach
+	return [list 0x20000 0 SCT]
+}
+
+proc find_table_vaddr {vaddr} {
+	if {[get_screen_mode] < 2} { return {} }
+	set regions [list [read_pnt] [read_ct] [read_pgt] [read_sat] [read_spt] [read_sct]]
+	set tables {}
+	foreach r $regions {
+		set start [lindex $r 0]
+		if {$vaddr < $start} { continue }
+		if {$vaddr > [expr $start + [lindex $r 1] - 1]} { continue }
+		lappend tables [lindex $r 2]
+	}
+	return $tables
 }
 
 proc _read_bios {} {
@@ -685,30 +721,30 @@ proc _read_bios {} {
 		}
 		RDVRM { ;# read data to VRAM
 			set vaddr [reg HL]
-			comment $fullpc "reading vram address"
+			comment $fullpc "reading VRAM address in [find_table_vaddr $vaddr]"
 		}
 		WRTVRM { ;# write data to VRAM
 			set vaddr [reg HL]
 			set byte  [reg A]
-			comment $fullpc "writing byte to VRAM address"
+			comment $fullpc "writing byte to VRAM address in [find_table_vaddr $vaddr]"
 		}
 		FILVRM { ;# fill VRAM
 			set byte  [reg A]
 			set len   [reg BC]
 			set vaddr [reg HL]
-			comment $fullpc "filling vram address"
+			comment $fullpc "filling vram address in [find_table_vaddr $vaddr]"
 		}
-		LDIRVM { ;# to VRAM from memory
+		LDIRVM { ;# from RAM to VRAM
 			set len   [reg BC]
 			set vaddr [reg DE]
 			set addr  [reg HL]
-			comment $fullpc "writing bytes from VRAM to RAM address"
+			comment $fullpc "writing bytes from RAM to VRAM in [find_table_vaddr $vaddr]"
 		}
-		LDIRMV { ;# to memory from VRAM
+		LDIRMV { ;# from VRAM to RAM
 			set len   [reg BC]
 			set addr  [reg DE]
 			set vaddr [reg HL]
-			comment $fullpc "writing byte froms from RAM to VRAM address"
+			comment $fullpc "writing bytes to RAM from VRAM address in [find_table_vaddr $vaddr]"
 		}
 		SETRD  { ;# set VDP address to read
 			set vaddr [reg HL]
