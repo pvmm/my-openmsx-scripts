@@ -8,17 +8,18 @@
 
 namespace eval tms9918_debug {
 
-variable started 0
+variable started 0 ;# properly initialised?
 variable wp1 {}
 variable wp2 {}    ;# internal watchpoints
 variable vdp.r
 variable vdp.w     ;# vdp registers
 variable v         ;# vram usage array
 variable addr      ;# current vdp address
-variable status 0  ;# write-to-memory status
+variable status 0  ;# write-to-vram address status (0 = LSB, 1 = MSB)
 variable c         ;# command array
 variable c_count 1 ;# command array counter
 
+# environment variable support for debugging
 proc env {varname {defaults {}}} {
 	if {[info exists ::env($varname)]} {
 		return $::env($varname);
@@ -26,17 +27,20 @@ proc env {varname {defaults {}}} {
 	return $defaults;
 }
 
+# find VDP ports
 proc rescan_vdp_reg {} {
 	variable vdp.r [peek 7]
 	variable vdp.w [expr ${vdp.r} + 1]
 	puts "VDP ports found: #[format %x ${vdp.r}] and #[format %x ${vdp.w}]"
 }
 
+# more debug stuff
 proc _catch {cmd} {
         if {[env DEBUG] ne 0} {
                 if {[catch $cmd fid]} {
                         puts stderr $::errorInfo
                         error $::errorInfo
+			# stop barrage of error messages
 			debug break
                 }
         } else {
@@ -76,7 +80,7 @@ proc waitbyte {} {
 			eval [lindex $c($idx) 2]
 		}
 	}
-	incr addr
+	incr addr ;# reused address incremented
 	return
 }
 
