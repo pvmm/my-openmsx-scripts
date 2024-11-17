@@ -1,3 +1,11 @@
+# Copyright © 2024 Pedro de Medeiros (pedro.medeiros at gmail.com)
+#
+# TODO:
+# * detect BIOS functions that write to VRAM;
+# * allow user to set watchpoints to VRAM regions (PGT, PNT, SPT, etc.);
+# * MSX2/2+ support:
+#   - detect VDP commands that write to VRAM;
+
 namespace eval tms9918_debug {
 
 variable started 0
