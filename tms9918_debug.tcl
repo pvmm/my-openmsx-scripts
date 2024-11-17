@@ -36,16 +36,16 @@ proc rescan_vdp_reg {} {
 
 # more debug stuff
 proc _catch {cmd} {
-        if {[env DEBUG] ne 0} {
-                if {[catch $cmd fid]} {
-                        puts stderr $::errorInfo
-                        error $::errorInfo
+	if {[env DEBUG] ne 0} {
+		if {[catch $cmd fid]} {
+			puts stderr $::errorInfo
+			error $::errorInfo
 			# stop barrage of error messages
 			debug break
-                }
-        } else {
+		}
+	} else {
 		eval $cmd
-        }
+	}
 }
 
 proc checkaddr {} {
