@@ -161,6 +161,33 @@ proc remove_vram_watchpoint {name} {
 	}
 }
 
+set_help_proc tms9918_debug [namespace code tms9918_debug_help]
+proc tms9918_debug_help {args} {
+	if {[llength $args] eq 1} {
+		return {The tms9918_debug script allows users to create watchpoints in VRAM without resorting to slow conditions.
+
+Recognized commands: set_vram_watchpoint, remove_vram_watchpoint
+}}
+	switch -- [lindex $args 1] {
+		"set_vram_watchpoint" {return {Create VRAM watchpoint.
+
+Syntax: tms9918_debug::set_vram_watchpoint <address> [<command>]
+
+<address> may be a single value or a {<begin> <end>} region.
+If <command> is not specified, "debug break" is used by default.
+The name of the watchpoint formatted as wp#<number> is returned.
+}
+		}
+		"remove_vram_watchpoint" {return {Remove VRAM watchpoint.
+
+Syntax: tms9918_debug::remove_vram_watchpoint <name>
+
+<name> is the name of the watchpoint returned by set_vram_watchpoint.
+}
+		}
+	}
+}
+
 namespace export tms9918_debug
 
 } ;# namespace tms9918_debug
