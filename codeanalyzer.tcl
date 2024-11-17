@@ -1,3 +1,5 @@
+# Copyright © 2024 Pedro de Medeiros (pedro.medeiros at gmail.com)
+
 namespace eval codeanalyzer {
 
 # TODO:
