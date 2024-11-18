@@ -110,7 +110,12 @@ proc start {} {
 	return
 }
 
-proc stop {} {
+proc shutdown {} {
+	variable c
+	unset c
+	variable v
+	unset v
+	variable c_count 1
 	_remove_wps
 	return
 }
@@ -181,7 +186,7 @@ proc tms9918_debug_help {args} {
 	if {[llength $args] eq 1} {
 		return {The tms9918_debug script allows users to create watchpoints in VRAM without resorting to slow conditions.
 
-Recognized commands: scan_vdp_regs, set_vram_watchpoint, remove_vram_watchpoint, list_vram_watchpoints
+Recognized commands: scan_vdp_regs, set_vram_watchpoint, remove_vram_watchpoint, list_vram_watchpoints, shutdown
 }}
 	switch -- [lindex $args 1] {
 		"scan_vdp_regs" {return {Find alternative VDP ports if there is a second VDP chip.
@@ -203,6 +208,16 @@ The name of the watchpoint formatted as wp#<number> is returned.
 Syntax: tms9918_debug::remove_vram_watchpoint <name>
 
 <name> is the name of the watchpoint returned by set_vram_watchpoint.
+}
+		}
+		"list_vram_watchpoints" {return {List all VRAM watchpoints created by this script.
+
+Syntax: tms9918_debug::list_vram_watchpoints
+}
+		}
+		"shutdown" {return {Stop script execution and remove all VRAM watchpoints.
+
+Syntax: tms9918_debug::shutdown
 }
 		}
 	}
