@@ -9,13 +9,10 @@
 namespace eval tms9918_debug {
 
 variable started 0 ;# properly initialised?
-variable wp1 {}
-variable wp2 {}    ;# internal watchpoints
+variable wp {}     ;# internal watchpoint
 variable vdp.r 152
 variable vdp.w 153 ;# default vdp registers (0x98, 0x99)
 variable v         ;# vram usage array
-variable addr {}   ;# current vdp address
-variable status 0  ;# write-to-vram address status (0 = LSB, 1 = MSB)
 variable c         ;# command array
 variable c_count 1 ;# command array counter
 
@@ -48,65 +45,38 @@ proc _catch {cmd} {
 	}
 }
 
-proc checkaddr {} {
-	variable status
-	variable addr
-	if {$::wp_last_value eq {}} {
-		return
-	}
-	if {$status eq 0} {
-		set addr $::wp_last_value
-		incr status
-	} elseif {[expr $::wp_last_value & 0x40] ne 0} { ;# is it writing?
-		# build 14-bit address, but first remove bit6 write access mode
-		set addr [expr (($::wp_last_value & ~0x40) << 8) + $addr]
-		set status 0
-		#puts "address set to [format 0x%04x $addr]"
-	} else {
-		set addr {}
-		set status 0
-	}
+proc vram_pointer {} {
+	expr {[debug read "VRAM pointer" 0] + 256 * [debug read "VRAM pointer" 1]}
 }
 
 proc waitbyte {} {
 	variable v
-	variable addr
-	variable status 0 ;# force status to 0
 	variable c
-	if {$addr eq {}} { return }
 	# found observed region?
-	if {[array get v $addr] ne {}} {
-		foreach idx $v($addr) {
-			#puts "running command \"[lindex $c($idx) 1]\" at 0x[format %04x $addr]"
+	if {[array get v [vram_pointer]] ne {}} {
+		foreach idx $v([vram_pointer]) {
+			#puts "running command \"[lindex $c($idx) 1]\" at 0x[format %04x [vram_pointer]]"
 			eval [lindex $c($idx) 1]
 		}
 	}
-	incr addr ;# reused address incremented
 	return
 }
 
-proc _remove_wps {} {
-	variable wp1
-	variable wp2
-	if {$wp1 ne {}} {
-		debug remove_watchpoint $wp1
-		set wp1 ""
-	}
-	if {$wp2 ne {}} {
-		debug remove_watchpoint $wp2
-		set wp2 ""
+proc _remove_wp {} {
+	variable wp
+	if {$wp ne {}} {
+		debug remove_watchpoint $wp
+		set wp {}
 	}
 }
 
 proc start {} {
 	variable started 1
+	_remove_wp
+	variable wp
 	variable vdp.r
 	variable vdp.w
-	variable wp1
-	variable wp2
-	_remove_wps
-	set wp1 [debug set_watchpoint write_io ${vdp.r} {} {tms9918_debug::_catch waitbyte}]
-	set wp2 [debug set_watchpoint write_io ${vdp.w} {} {tms9918_debug::_catch checkaddr}]
+	set wp [debug set_watchpoint write_io ${vdp.r} {} {tms9918_debug::_catch waitbyte}]
 	return
 }
 
@@ -116,7 +86,7 @@ proc shutdown {} {
 	variable v
 	unset v
 	variable c_count 1
-	_remove_wps
+	_remove_wp
 	return
 }
 
