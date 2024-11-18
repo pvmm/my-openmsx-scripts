@@ -84,7 +84,7 @@ proc waitbyte {} {
 	return
 }
 
-proc remove_wps {} {
+proc _remove_wps {} {
 	variable wp1
 	variable wp2
 	if {$wp1 ne {}} {
@@ -103,14 +103,14 @@ proc start {} {
 	variable vdp.w
 	variable wp1
 	variable wp2
-	remove_wps
+	_remove_wps
 	set wp1 [debug set_watchpoint write_io ${vdp.r} {} {tms9918_debug::_catch waitbyte}]
 	set wp2 [debug set_watchpoint write_io ${vdp.w} {} {tms9918_debug::_catch checkaddr}]
 	return
 }
 
 proc stop {} {
-	remove_wps
+	_remove_wps
 	return
 }
 
@@ -128,7 +128,7 @@ proc set_vram_watchpoint {addr {cmd "debug break"}} {
 	} else {
 		error "addr: address or {begin end} value range expected"
 	}
-	set c($c_count) "$begin $end \"$cmd\""
+	set c($c_count) "$begin $end {$cmd}"
 	for {set addr $begin} {$addr < $end} {incr addr} {
 		lappend v($addr) $c_count
 	}
@@ -144,7 +144,7 @@ proc remove_vram_watchpoint {name} {
 	if {$started eq 0} {
 		error "No such watchpoint: $name"
 	}
-	set num [scan $name vw#%c]
+	set num [scan $name vw#%i]
 	if {[array get c $num] ne {}} {
 		set begin [lindex c($num) 0]
 		set end   [lindex c($num) 1]
@@ -160,12 +160,19 @@ proc remove_vram_watchpoint {name} {
 	}
 }
 
+proc list_vram_watchpoints {} {
+	variable c
+	foreach {key value} [array get c] {
+		puts "vw#$key $value"
+	}
+}
+
 set_help_proc tms9918_debug [namespace code tms9918_debug_help]
 proc tms9918_debug_help {args} {
 	if {[llength $args] eq 1} {
 		return {The tms9918_debug script allows users to create watchpoints in VRAM without resorting to slow conditions.
 
-Recognized commands: scan_vdp_regs, set_vram_watchpoint, remove_vram_watchpoint
+Recognized commands: scan_vdp_regs, set_vram_watchpoint, remove_vram_watchpoint, list_vram_watchpoints
 }}
 	switch -- [lindex $args 1] {
 		"scan_vdp_regs" {return {Find alternative VDP ports if there is a second VDP chip.
@@ -195,5 +202,3 @@ Syntax: tms9918_debug::remove_vram_watchpoint <name>
 namespace export tms9918_debug
 
 } ;# namespace tms9918_debug
-
-namespace import tms9918_debug::*
