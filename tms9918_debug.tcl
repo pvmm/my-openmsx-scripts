@@ -11,8 +11,8 @@ namespace eval tms9918_debug {
 variable started 0 ;# properly initialised?
 variable wp1 {}
 variable wp2 {}    ;# internal watchpoints
-variable vdp.r
-variable vdp.w     ;# vdp registers
+variable vdp.r 152
+variable vdp.w 153 ;# default vdp registers (0x98, 0x99)
 variable v         ;# vram usage array
 variable addr      ;# current vdp address
 variable status 0  ;# write-to-vram address status (0 = LSB, 1 = MSB)
@@ -27,8 +27,8 @@ proc env {varname {defaults {}}} {
 	return $defaults;
 }
 
-# find VDP ports
-proc rescan_vdp_reg {} {
+# find alternative VDP
+proc scan_vdp_regs {} {
 	variable vdp.r [peek 7]
 	variable vdp.w [expr ${vdp.r} + 1]
 	puts "VDP ports found: #[format %x ${vdp.r}] and #[format %x ${vdp.w}]"
@@ -104,7 +104,6 @@ proc start {} {
 	variable wp1
 	variable wp2
 	remove_wps
-	rescan_vdp_reg
 	set wp1 [debug set_watchpoint write_io ${vdp.r} {} {tms9918_debug::_catch waitbyte}]
 	set wp2 [debug set_watchpoint write_io ${vdp.w} {} {tms9918_debug::_catch checkaddr}]
 	return
@@ -166,9 +165,14 @@ proc tms9918_debug_help {args} {
 	if {[llength $args] eq 1} {
 		return {The tms9918_debug script allows users to create watchpoints in VRAM without resorting to slow conditions.
 
-Recognized commands: set_vram_watchpoint, remove_vram_watchpoint
+Recognized commands: scan_vdp_regs, set_vram_watchpoint, remove_vram_watchpoint
 }}
 	switch -- [lindex $args 1] {
+		"scan_vdp_regs" {return {Find alternative VDP ports if there is a second VDP chip.
+
+Syntax: tms9918_debug::scan_vdp_regs
+}
+		}
 		"set_vram_watchpoint" {return {Create VRAM watchpoint.
 
 Syntax: tms9918_debug::set_vram_watchpoint <address> [<command>]
