@@ -57,15 +57,11 @@ set_help_text tms9918_debug::scan_vdp_regs $help_scan_vdp_regs
 
 # more debug stuff
 proc _catch {cmd} {
-	if {[env DEBUG] ne 0} {
-		if {[catch $cmd fid]} {
-			puts stderr $::errorInfo
-			error $::errorInfo
-			# stop barrage of error messages
-			debug break
-		}
-	} else {
-		eval $cmd
+	if {[catch $cmd fid]} {
+		puts stderr $::errorInfo
+		error $::errorInfo
+		# stop barrage of error messages
+		debug break
 	}
 }
 
@@ -99,7 +95,11 @@ proc start {} {
 	variable wp
 	variable vdp.r
 	variable vdp.w
-	set wp [debug set_watchpoint write_io ${vdp.r} {} {tms9918_debug::_catch waitbyte}]
+	if {[env DEBUG] eq {}} {
+		set wp [debug set_watchpoint write_io ${vdp.r} {} {tms9918_debug::waitbyte}]
+	} else {
+		set wp [debug set_watchpoint write_io ${vdp.r} {} {tms9918_debug::_catch waitbyte}]
+	}
 	return
 }
 
@@ -177,12 +177,17 @@ proc remove_vram_watchpoint {name} {
 	}
 	set num [scan $name vw#%i]
 	if {[array get c $num] ne {}} {
-		set begin [lindex c($num) 0]
-		set end   [lindex c($num) 1]
-		for {set addr $begin} {$addr < $end} {incr addr} {
-			if {[lsearch -exact $v($addr) $num] >= 0} {
+		set begin [lindex [lindex $c($num) 0] 0]
+		if {[llength [lindex $c($num) 0]] eq 2} {
+			set end [lindex [lindex $c($num) 0] 1]
+		} else {
+			set end $begin
+		}
+		for {set addr $begin} {$addr <= $end} {incr addr} {
+			set pos [lsearch -exact $v($addr) $num]
+			if {$pos >= 0} {
 				# remove element from array of addresses
-				set v($addr) [lreplace $v($addr) $num $num]
+				set v($addr) [lreplace $v($addr) $pos $pos]
 			}
 		}
 		unset c($num)
@@ -205,8 +210,4 @@ proc list_vram_watchpoints {} {
 }
 set_help_text tms9918_debug::list_vram_watchpoints $help_list_vram_watchpoints
 
-namespace export tms9918_debug
-
 } ;# namespace tms9918_debug
-
-namespace import tms9918_debug::*
