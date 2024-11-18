@@ -1,8 +1,9 @@
 # Copyright © 2024 Pedro de Medeiros (pedro.medeiros at gmail.com)
 #
 # TODO:
-# * detect BIOS functions that write to VRAM instead of going into BIOS;
+# * detect BIOS function call as an interface instead of always going into BIOS code;
 # * allow user to set watchpoints to VRAM regions (PGT, PNT, SPT, etc.);
+# * allow user to set "watchpixels" on (x, y) coordinates in VRAM;
 # * MSX2/2+ support:
 #   - detect VDP commands that write to VRAM;
 
