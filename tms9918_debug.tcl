@@ -29,6 +29,7 @@ Recognized commands:
 	tms9918_debug::set_vram_watchpoint
 	tms9918_debug::remove_vram_watchpoint
 	tms9918_debug::list_vram_watchpoints
+	tms9918_debug::vram_pointer
 	tms9918_debug::shutdown
 "
 set_help_text tms9918_debug $help_tms9918_debug
@@ -53,7 +54,7 @@ proc scan_vdp_reg {} {
 }
 set_help_text tms9918_debug::scan_vdp_reg $help_scan_vdp_reg
 
-# more debug stuff
+# catch error and display more useful information like location
 proc _catch {cmd} {
 	if {[catch $cmd fid]} {
 		puts stderr $::errorInfo
@@ -63,11 +64,17 @@ proc _catch {cmd} {
 	}
 }
 
+set help_vram_pointer "$help_text
+Return last VRAM address used.
+
+Syntax: tms9918_debug::vram_pointer
+"
 proc vram_pointer {} {
 	expr {[debug read "VRAM pointer" 0] + ([debug read "VRAM pointer" 1] << 8)}
 }
+set_help_text tms9918_debug::vram_pointer $help_vram_pointer
 
-proc waitbyte {} {
+proc receive_byte {} {
 	variable v
 	variable c
 	# found observed region?
@@ -93,9 +100,9 @@ proc start {} {
 	variable wp
 	variable vdp
 	if {[env DEBUG] eq {}} {
-		set wp [debug set_watchpoint write_io ${vdp} {} {tms9918_debug::waitbyte}]
+		set wp [debug set_watchpoint write_io ${vdp} {} {tms9918_debug::receive_byte}]
 	} else {
-		set wp [debug set_watchpoint write_io ${vdp} {} {tms9918_debug::_catch waitbyte}]
+		set wp [debug set_watchpoint write_io ${vdp} {} {tms9918_debug::_catch receive_byte}]
 	}
 	return
 }
