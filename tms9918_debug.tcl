@@ -14,7 +14,7 @@ variable wp2 {}    ;# internal watchpoints
 variable vdp.r 152
 variable vdp.w 153 ;# default vdp registers (0x98, 0x99)
 variable v         ;# vram usage array
-variable addr      ;# current vdp address
+variable addr {}   ;# current vdp address
 variable status 0  ;# write-to-vram address status (0 = LSB, 1 = MSB)
 variable c         ;# command array
 variable c_count 1 ;# command array counter
@@ -61,7 +61,7 @@ proc checkaddr {} {
 		# build 14-bit address, but first remove bit6 write access mode
 		set addr [expr (($::wp_last_value & ~0x40) << 8) + $addr]
 		set status 0
-		#puts "address set to [format %x $addr]"
+		#puts "address set to [format 0x%04x $addr]"
 	} else {
 		set addr {}
 		set status 0
@@ -73,11 +73,12 @@ proc waitbyte {} {
 	variable addr
 	variable status 0 ;# force status to 0
 	variable c
+	if {$addr eq {}} { return }
 	# found observed region?
 	if {[array get v $addr] ne {}} {
 		foreach idx $v($addr) {
-			#puts "running command at [format %x $addr]"
-			eval [lindex $c($idx) 2]
+			#puts "running command \"[lindex $c($idx) 1]\" at 0x[format %04x $addr]"
+			eval [lindex $c($idx) 1]
 		}
 	}
 	incr addr ;# reused address incremented
@@ -120,16 +121,24 @@ proc set_vram_watchpoint {addr {cmd "debug break"}} {
 	variable c_count
 	variable started
 	if {$started eq 0} { start }
-	set begin [lindex $addr 0]
-	if {[llength $addr] eq 1} {
-		set end [lindex $addr 0]
-	} elseif {[llength $addr] eq 2} {
-		set end [lindex $addr 1]
-	} else {
-		error "addr: address or {begin end} value range expected"
+	if {[llength $addr] > 2} {
+		error "addr: address or {<begin> <end>} value range expected"
 	}
-	set c($c_count) "$begin $end {$cmd}"
-	for {set addr $begin} {$addr < $end} {incr addr} {
+	set begin [lindex $addr 0]
+	if {![string is integer -strict $begin]} {
+		error "\"$begin\" is not an address"
+	}
+	if {[llength $addr] eq 2} {
+		set end [lindex $addr 1]
+		if {![string is integer -strict $end]} {
+			error "\"$end\" is not an address"
+		}
+		set c($c_count) "{$begin $end} {$cmd}"
+	} else {
+		set c($c_count) "$begin {$cmd}"
+		set end $begin
+	}
+	for {set addr $begin} {$addr <= $end} {incr addr} {
 		lappend v($addr) $c_count
 	}
 	set old_index $c_count
