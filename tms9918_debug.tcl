@@ -16,6 +16,7 @@ set help_text {
 }
 variable started 0 ;# properly initialised?
 variable wp {}     ;# internal watchpoint
+variable pw {}     ;# VDP.command probe watchpoint
 variable vdp 152   ;# first vdp register (default: 0x98)
 variable v         ;# vram usage array
 variable c         ;# command array
@@ -86,6 +87,9 @@ proc receive_byte {} {
 	return
 }
 
+proc receive_cmmd {} {
+}
+
 proc _remove_wp {} {
 	variable wp
 	if {$wp ne {}} {
@@ -100,9 +104,11 @@ proc start {} {
 	variable wp
 	variable vdp
 	if {[env DEBUG] eq {}} {
-		set wp [debug set_watchpoint write_io ${vdp} {} {tms9918_debug::receive_byte}]
+		set wp [debug set_watchpoint write_io ${vdp} {} tms9918_debug::receive_byte]
+		set pw [debug probe set_bp VDP.commandExecuting {} tms9918_debug::receive_cmmd]
 	} else {
 		set wp [debug set_watchpoint write_io ${vdp} {} {tms9918_debug::_catch receive_byte}]
+		set pw [debug probe set_bp VDP.commandExecuting {} {tms9918_debug::_catch receive_cmmd}]
 	}
 	return
 }
