@@ -30,8 +30,10 @@ Recognized commands:
 	vdpdebugger::set_vram_watchpoint        Set VRAM watchpoint on address or region
 	vdpdebugger::remove_vram_watchpoint     Removfe VRAM watchpoint by name
 	vdpdebugger::list_vram_watchpoints      List current VRAM watchpoints
-	vdpdebugger::vram_pointer               Show last used VRAM address
+	vdpdebugger::vram_pointer               Return last used VRAM address
 	vdpdebugger::shutdown                   Disable vdp debugger completely
+
+type \"help <command>\" for more details.
 "
 set_help_text vdpdebugger $help_vdpdebugger
 
