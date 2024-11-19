@@ -10,9 +10,9 @@
 namespace eval vdpdebugger {
 
 set help_text {
----------------------------------------------------------------
- vdpdebugger 0.7 for openMSX by pvm (pedro.medeiros@gmail.com)
----------------------------------------------------------------
+----------------------------------------------------------------
+ vdp debugger 0.7 for openMSX by pvm (pedro.medeiros@gmail.com)
+----------------------------------------------------------------
 }
 variable started 0 ;# properly initialised?
 variable wp {}     ;# internal watchpoint
