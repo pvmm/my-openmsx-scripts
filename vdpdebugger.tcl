@@ -17,7 +17,7 @@ set help_text {
 variable started 0 ;# properly initialised?
 variable wp {}     ;# internal watchpoint
 variable pw {}     ;# VDP.command probe watchpoint
-variable vdp 152   ;# first vdp register (default: 0x98)
+variable vdp 152   ;# vdp register (default: 0x98)
 variable v         ;# vram usage array
 variable c         ;# command array
 variable c_count 1 ;# command array counter
@@ -26,7 +26,7 @@ set help_vdpdebugger "$help_text
 The vdp debugger script allows users to create watchpoints in VRAM without resorting to conditions since they are so slow.
 
 Recognized commands:
-	vdpdebugger::scan_vdp_reg               Detect first VDP register
+	vdpdebugger::scan_vdp                   Detect first VDP register
 	vdpdebugger::set_vram_watchpoint        Set VRAM watchpoint on address or region
 	vdpdebugger::remove_vram_watchpoint     Removfe VRAM watchpoint by name
 	vdpdebugger::list_vram_watchpoints      List current VRAM watchpoints
@@ -46,16 +46,16 @@ proc env {varname {defaults {}}} {
 }
 
 # find alternative VDP
-set help_scan_vdp_reg "$help_text
-Find alternative VDP port if there is a secondary VDP.
+set help_scan_vdp "$help_text
+Find current VDP port if there is a second VDP for instance.
 
-Syntax: vdpdebugger::scan_vdp_reg
+Syntax: vdpdebugger::scan_vdp
 "
-proc scan_vdp_reg {} {
+proc scan_vdp {} {
 	variable vdp [peek 7]
-	puts "VDP port found: #[format %x ${vdp}]"
+	puts "VDP port found at #[format %x ${vdp}]"
 }
-set_help_text vdpdebugger::scan_vdp_reg $help_scan_vdp_reg
+set_help_text vdpdebugger::scan_vdp $help_scan_vdp
 
 # catch error and display more useful information like a stack trace
 proc _catch {cmd} {
