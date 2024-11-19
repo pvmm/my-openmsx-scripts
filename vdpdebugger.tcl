@@ -7,12 +7,12 @@
 # * allow user to set watchpoints to VRAM regions (PGT, PNT, SPT, etc.);
 # * allow user to set "watchpixels" on (x, y) coordinates in VRAM;
 
-namespace eval tms9918_debug {
+namespace eval vdpdebugger {
 
 set help_text {
------------------------------------------------------------------
- tms9918_debug 0.7 for openMSX by pvm (pedro.medeiros@gmail.com)
------------------------------------------------------------------
+---------------------------------------------------------------
+ vdpdebugger 0.7 for openMSX by pvm (pedro.medeiros@gmail.com)
+---------------------------------------------------------------
 }
 variable started 0 ;# properly initialised?
 variable wp {}     ;# internal watchpoint
@@ -22,18 +22,18 @@ variable v         ;# vram usage array
 variable c         ;# command array
 variable c_count 1 ;# command array counter
 
-set help_tms9918_debug "$help_text
-The tms9918_debug script allows users to create watchpoints in VRAM without resorting to conditions since they are slow.
+set help_vdpdebugger "$help_text
+The vdpdebugger script allows users to create watchpoints in VRAM without resorting to conditions since they are so slow.
 
 Recognized commands:
-	tms9918_debug::scan_vdp_reg
-	tms9918_debug::set_vram_watchpoint
-	tms9918_debug::remove_vram_watchpoint
-	tms9918_debug::list_vram_watchpoints
-	tms9918_debug::vram_pointer
-	tms9918_debug::shutdown
+	vdpdebugger::scan_vdp_reg
+	vdpdebugger::set_vram_watchpoint
+	vdpdebugger::remove_vram_watchpoint
+	vdpdebugger::list_vram_watchpoints
+	vdpdebugger::vram_pointer
+	vdpdebugger::shutdown
 "
-set_help_text tms9918_debug $help_tms9918_debug
+set_help_text vdpdebugger $help_vdpdebugger
 
 # environment variable support for debugging
 proc env {varname {defaults {}}} {
@@ -47,13 +47,13 @@ proc env {varname {defaults {}}} {
 set help_scan_vdp_reg "$help_text
 Find alternative VDP port if there is a secondary VDP.
 
-Syntax: tms9918_debug::scan_vdp_reg
+Syntax: vdpdebugger::scan_vdp_reg
 "
 proc scan_vdp_reg {} {
 	variable vdp [peek 7]
 	puts "VDP port found: #[format %x ${vdp}]"
 }
-set_help_text tms9918_debug::scan_vdp_reg $help_scan_vdp_reg
+set_help_text vdpdebugger::scan_vdp_reg $help_scan_vdp_reg
 
 # catch error and display more useful information like location
 proc _catch {cmd} {
@@ -68,12 +68,12 @@ proc _catch {cmd} {
 set help_vram_pointer "$help_text
 Return last VRAM address used.
 
-Syntax: tms9918_debug::vram_pointer
+Syntax: vdpdebugger::vram_pointer
 "
 proc vram_pointer {} {
 	expr {[debug read "VRAM pointer" 0] + ([debug read "VRAM pointer" 1] << 8)}
 }
-set_help_text tms9918_debug::vram_pointer $help_vram_pointer
+set_help_text vdpdebugger::vram_pointer $help_vram_pointer
 
 proc receive_byte {} {
 	variable v
@@ -104,11 +104,11 @@ proc start {} {
 	variable wp
 	variable vdp
 	if {[env DEBUG] eq {}} {
-		set wp [debug set_watchpoint write_io ${vdp} {} tms9918_debug::receive_byte]
-		set pw [debug probe set_bp VDP.commandExecuting {} tms9918_debug::receive_cmmd]
+		set wp [debug set_watchpoint write_io ${vdp} {} vdpdebugger::receive_byte]
+		set pw [debug probe set_bp VDP.commandExecuting {} vdpdebugger::receive_cmmd]
 	} else {
-		set wp [debug set_watchpoint write_io ${vdp} {} {tms9918_debug::_catch receive_byte}]
-		set pw [debug probe set_bp VDP.commandExecuting {} {tms9918_debug::_catch receive_cmmd}]
+		set wp [debug set_watchpoint write_io ${vdp} {} {vdpdebugger::_catch receive_byte}]
+		set pw [debug probe set_bp VDP.commandExecuting {} {vdpdebugger::_catch receive_cmmd}]
 	}
 	return
 }
@@ -116,7 +116,7 @@ proc start {} {
 set help_shutdown "$help_text
 Stop script execution and remove all VRAM watchpoints.
 
-Syntax: tms9918_debug::shutdown
+Syntax: vdpdebugger::shutdown
 "
 proc shutdown {} {
 	variable started 0
@@ -128,12 +128,12 @@ proc shutdown {} {
 	_remove_wp
 	return
 }
-set_help_text tms9918_debug::shutdown $help_shutdown
+set_help_text vdpdebugger::shutdown $help_shutdown
   
 set help_set_vram_watchpoint "$help_text
 Create VRAM watchpoint.
 
-Syntax: tms9918_debug::set_vram_watchpoint <address> \[<command>\]
+Syntax: vdpdebugger::set_vram_watchpoint <address> \[<command>\]
 
 <address> may be a single value or a {<begin> <end>} region.
 If <command> is not specified, \"debug break\" is used by default.
@@ -169,12 +169,12 @@ proc set_vram_watchpoint {addr {cmd "debug break"}} {
 	incr c_count
 	return "vw#${old_index}"
 }
-set_help_text tms9918_debug::set_vram_watchpoint $help_set_vram_watchpoint
+set_help_text vdpdebugger::set_vram_watchpoint $help_set_vram_watchpoint
 
 set help_remove_vram_watchpoint "$help_text
 Remove VRAM watchpoint.
 
-Syntax: tms9918_debug::remove_vram_watchpoint <name>
+Syntax: vdpdebugger::remove_vram_watchpoint <name>
 
 <name> is the name of the watchpoint returned by set_vram_watchpoint.
 "
@@ -205,12 +205,12 @@ proc remove_vram_watchpoint {name} {
 		error "No such watchpoint: $name"
 	}
 }
-set_help_text tms9918_debug::remove_vram_watchpoint $help_remove_vram_watchpoint
+set_help_text vdpdebugger::remove_vram_watchpoint $help_remove_vram_watchpoint
 
 set help_list_vram_watchpoints "$help_text
 List all VRAM watchpoints created by this script.
 
-Syntax: tms9918_debug::list_vram_watchpoints
+Syntax: vdpdebugger::list_vram_watchpoints
 "
 proc list_vram_watchpoints {} {
 	variable c
@@ -218,6 +218,6 @@ proc list_vram_watchpoints {} {
 		puts "vw#$key $value"
 	}
 }
-set_help_text tms9918_debug::list_vram_watchpoints $help_list_vram_watchpoints
+set_help_text vdpdebugger::list_vram_watchpoints $help_list_vram_watchpoints
 
-} ;# namespace tms9918_debug
+} ;# namespace vdpdebugger

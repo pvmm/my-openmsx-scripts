@@ -5,7 +5,7 @@ My collection of openMSX scripts
 * **mm.tcl**: `mm::toggle_access` captures writes to MSX-MUSIC registers $0-$7 when defining instrument 0;
 * **_vgmrecorder.tcl**: modified VGM recording script that can write OPL3 VGMs;
 * **_casrecorder.tcl**: simple script that appends binary/BASIC/ASCII file to a CAS file;
-* **tms9918_debug.tcl**: script that allow user to create watchpoints in VRAM on the MSX1;
+* **vdpdebugger.tcl**: script that allow user to create watchpoints in VRAM;
 
 ## not ready yet
 * **codeanalyzer.tcl**: script that marks memory as CODE or DATA dynamically (as the program runs in OpenMSX). Useful for source code annotation;
