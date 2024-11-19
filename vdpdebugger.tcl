@@ -92,9 +92,12 @@ proc receive_cmmd {} {
 
 proc _remove_wp {} {
 	variable wp
+	variable pw
 	if {$wp ne {}} {
 		debug remove_watchpoint $wp
 		set wp {}
+		debug probe remove_bp $pw
+		set pw {}
 	}
 }
 
