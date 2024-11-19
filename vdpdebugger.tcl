@@ -23,7 +23,7 @@ variable c         ;# command array
 variable c_count 1 ;# command array counter
 
 set help_vdpdebugger "$help_text
-The vdpdebugger script allows users to create watchpoints in VRAM without resorting to conditions since they are so slow.
+The vdp debugger script allows users to create watchpoints in VRAM without resorting to conditions since they are so slow.
 
 Recognized commands:
 	vdpdebugger::scan_vdp_reg               Detect first VDP register
