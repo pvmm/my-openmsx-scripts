@@ -87,10 +87,11 @@ proc receive_byte {} {
 	return
 }
 
-proc receive_cmmd {} {
+proc receive_cmd {} {
+	# TODO: read vdp regs just like reportVdpCommand
 }
 
-proc _remove_wp {} {
+proc _remove_wps {} {
 	variable wp
 	variable pw
 	if {$wp ne {}} {
@@ -103,15 +104,15 @@ proc _remove_wp {} {
 
 proc start {} {
 	variable started 1
-	_remove_wp
+	_remove_wps
 	variable wp
 	variable vdp
 	if {[env DEBUG] eq {}} {
 		set wp [debug set_watchpoint write_io ${vdp} {} vdpdebugger::receive_byte]
-		set pw [debug probe set_bp VDP.commandExecuting {} vdpdebugger::receive_cmmd]
+		set pw [debug probe set_bp VDP.commandExecuting {} vdpdebugger::receive_cmd]
 	} else {
 		set wp [debug set_watchpoint write_io ${vdp} {} {vdpdebugger::_catch receive_byte}]
-		set pw [debug probe set_bp VDP.commandExecuting {} {vdpdebugger::_catch receive_cmmd}]
+		set pw [debug probe set_bp VDP.commandExecuting {} {vdpdebugger::_catch receive_cmd}]
 	}
 	return
 }
@@ -128,7 +129,7 @@ proc shutdown {} {
 	variable v
 	unset v
 	variable c_count 1
-	_remove_wp
+	_remove_wps
 	return
 }
 set_help_text vdpdebugger::shutdown $help_shutdown
