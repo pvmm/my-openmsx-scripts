@@ -4,7 +4,7 @@
 # * MSX2/2+ support:
 #   - detect VDP commands that write to VRAM;
 # * detect BIOS function call as an interface instead of always going into BIOS code;
-# * allow user to set watchpoints to VRAM regions (PGT, PNT, SPT, etc.);
+# * allow user to attach watchpoints to VRAM regions (PGT, PNT, SPT, etc.);
 # * allow user to set "watchpixels" on (x, y) coordinates in VRAM;
 
 namespace eval vdpdebugger {
