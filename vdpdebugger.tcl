@@ -26,12 +26,12 @@ set help_vdpdebugger "$help_text
 The vdpdebugger script allows users to create watchpoints in VRAM without resorting to conditions since they are so slow.
 
 Recognized commands:
-	vdpdebugger::scan_vdp_reg
-	vdpdebugger::set_vram_watchpoint
-	vdpdebugger::remove_vram_watchpoint
-	vdpdebugger::list_vram_watchpoints
-	vdpdebugger::vram_pointer
-	vdpdebugger::shutdown
+	vdpdebugger::scan_vdp_reg               Detect first VDP register
+	vdpdebugger::set_vram_watchpoint        Set VRAM watchpoint on address or region
+	vdpdebugger::remove_vram_watchpoint     Removfe VRAM watchpoint by name
+	vdpdebugger::list_vram_watchpoints      List current VRAM watchpoints
+	vdpdebugger::vram_pointer               Show last used VRAM address
+	vdpdebugger::shutdown                   Disable vdp debugger completely
 "
 set_help_text vdpdebugger $help_vdpdebugger
 
