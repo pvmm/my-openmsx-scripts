@@ -55,7 +55,7 @@ proc scan_vdp_reg {} {
 }
 set_help_text vdpdebugger::scan_vdp_reg $help_scan_vdp_reg
 
-# catch error and display more useful information like location
+# catch error and display more useful information like a stack trace
 proc _catch {cmd} {
 	if {[catch $cmd fid]} {
 		puts stderr $::errorInfo
