@@ -89,8 +89,38 @@ proc receive_byte {} {
 	return
 }
 
+proc DX {block} {
+	return [expr [lindex $block 4] + [lindex $block 5] << 8]   ;# regs 36 and 37
+}
+
+proc DY {block} {
+	return [expr [lindex $block 6] + [lindex $block 7] << 8]   ;# regs 38 and 39
+}
+
+proc NX {block} {
+	return [expr [lindex $block 8] + [lindex $block 9] << 8]   ;# regs 40 and 41
+}
+
+proc NY {block} {
+	return [expr [lindex $block 10] + [lindex $block 11] << 8] ;# regs 42 and 43
+}
+
 proc receive_cmd {} {
-	# TODO: read vdp regs just like reportVdpCommand
+	set cmd [debug read_block {VDP regs} 32 14]
+	binary scan $cmd c* bytes
+	if {[lsearch [expr [lindex $bytes end] & 0xf0] -exact {128 144 176}] >= 0} {
+		# Pixel (logic) operations
+		set dx [DX $cmd]
+		set dy [DY $cmd]
+		set nx [NX $cmd]
+		set ny [NY $cmd]
+	} elseif {[lsearch [expr [lindex $bytes end] & 0xf0] -exact {192 208 224 240}] >= 0} {
+		# Byte operations
+		set dx [DX $cmd]
+		set dy [DY $cmd]
+		set nx [NX $cmd]
+		set ny [NY $cmd]
+	}
 }
 
 proc _remove_wps {} {
