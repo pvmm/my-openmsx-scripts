@@ -11,15 +11,15 @@ proc open_comm {} {
 }
 
 proc handle_output {pipe} {
-    if {[eof $pipe]} {
+    if {[fblocked $pipe]} {
         puts "Process closed."
-        close_comm
+        fileevent $pipe readable {}
     }
     set output ""
     while {![fblocked $pipe]} {
         append output [read $pipe]
     }
-    puts -nonewline "output: $output"
+    puts -nonewline stderr "output: $output"
     flush stdout
 }
 
@@ -39,7 +39,9 @@ proc close_comm {} {
 proc start {} {
     variable pipe
     open_comm
+    send_command [list touch c]
     after time 1 [list send_command [list touch a]]
     after time 2 [list send_command [list touch b]]
     after time 3 [list send_command [list ls]]
+    after time 5 [list send_command [list exit]]
 }
