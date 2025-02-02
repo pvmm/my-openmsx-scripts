@@ -25,6 +25,8 @@
 #
 # Commands that SDCDB connector recognizes directly. You may call them with sdcdb::[COMMAND] [ARGS...]:
 #
+# select [PATH]
+#       - Set path to the SDCDB binary.
 # connect [src DIRECTORY1:DIRECTORY2:...] [NAME]
 #       - Invoke SDCDB and connect to it. You may specify paths to the source files
 #         that SDCDB uses. NAME points to the IHX (NAME.ihx) and CDB (NAME.cdb) files
@@ -48,6 +50,15 @@
 namespace eval sdcdb {
 
 variable pipe    0
+variable path    {}
+
+proc select {arg} {
+    variable path
+    if {![file exists $arg]} {
+        error "SDCDB file not found"
+    }
+    set path $arg
+}
 
 proc connect {} {
     variable pipe
