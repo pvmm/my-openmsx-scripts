@@ -50,46 +50,90 @@
 namespace eval sdcdb {
 
 variable pipe    0
-variable path    {}
+variable path    sdcdb
+variable message ""
+variable context none
 
-proc select {arg} {
-    variable path
-    if {![file exists $arg]} {
-        error "SDCDB file not found"
+proc output {args} {
+    set chan stdout
+    if {[llength $args] == 1} {
+        puts $chan [lindex $args 0]
+    } else {
+        puts [lindex $args 0] $chan [lindex $args 1]
     }
-    set path $arg
+    flush $chan
+}
+
+proc debug {args} {
+    set chan stderr
+    if {[llength $args] == 1} {
+        puts $chan [lindex $args 0]
+    } else {
+        puts [lindex $args 0] $chan [lindex $args 1]
+    }
+    flush $chan
+}
+
+proc select {p} {
+    variable path
+    if {[is_in_path $p] eq 0} {
+        if {![file isfile $p]} {
+            error "SDCDB not a file or file not found"
+        }
+    }
+    set path $p
+}
+
+proc is_in_path {program} {
+    foreach dir [split $::env(PATH) ":"] {
+        if {[file executable [file join $dir $program]]} {
+            return 1
+        }
+    }
+    return 0
 }
 
 proc connect {} {
-    variable pipe
+    variable path
+    select $path
     # Non-blocking comunication reading
-    set pipe [open |[list sdcdb] r+]
+    output "Opening SDCDB process..."
+    variable pipe
+    #set pipe [open |[list stdbuf -oL sdcdb] [list RDWR NOCTTY NONBLOCK]] ;# r+
+    #set pipe [open |[list $path 2>&1] [list RDWR]] ;# r+
+    set pipe [open |[list $path] [list RDWR NONBLOCK]]
     fconfigure $pipe -blocking 0 -buffering line
-    fileevent $pipe readable [list handle_output $pipe]
-    puts "SDCDB process opened."
+    fileevent $pipe readable [list sdcdb::handle_output]
 }
 
-proc handle_output {pipe} {
-    if {[fblocked $pipe]} {
-        puts "Process closed."
+proc handle_output {} {
+    variable pipe
+    if {[eof $pipe]} {
+        output "SDCDB process died."
         fileevent $pipe readable {}
+        close $pipe
+	variable pipe 0
+        return
     }
-    set output ""
-    while {![fblocked $pipe]} {
-        append output [read $pipe]
+    set output [read $pipe]
+    if {$output ne {}} {
+        debug -nonewline "output: $output"
     }
-    puts -nonewline stderr "output: $output"
-    flush stdout
+    variable context
+    if {$context eq break} {
+        output "added breakpoint at "
+    }
 }
 
 proc send_command {cmd} {
-    puts "send_command called"
+    debug "send_command($cmd)"
     variable pipe
     if {$pipe eq 0} {
         error "SDCDB connection not found, call connect first."
     }
-    puts $pipe $cmd
-    flush $pipe
+    if {[catch {puts $pipe $cmd; flush $pipe} err]} {
+        output "Error sending command: $err"
+    }
 }
 
 proc disconnect {} {
@@ -97,19 +141,28 @@ proc disconnect {} {
     if {$pipe eq 0} {
         error "SDCDB connection not found, call connect first."
     }
+    fileevent $pipe readable {}
     close $pipe
-    puts "SDCDB process closed."
+    output "SDCDB process closed."
     set pipe 0
 }
 
+proc break {arg} {
+    variable context break
+    send_command [list break $arg]
+}
+
+proc list {arg} {
+    variable context list
+    send_command [list list $arg]
+}
+
 proc test {} {
-    variable pipe
-    open_comm
-    send_command [list touch c]
-    after time 1 [list send_command [list touch a]]
-    after time 2 [list send_command [list touch b]]
-    after time 3 [list send_command [list ls]]
-    after time 5 [list send_command [list exit]]
+    ;#ucsim_z80
+    ;#/home/pedro/Projects/openmsx/my-openmsx-scripts/teste
+    variable path
+    sdcdb::select $path
+    sdcdb::connect
 }
 
 namespace export sdcdb
