@@ -50,6 +50,41 @@ variable context {}
 variable command        ;# last command sent to debugger
 variable empty   0      ;# last response was empty?
 
+set_help_proc sdcdb [namespace code sdcdb_help]
+proc sdcdb_help {args} {
+        if {[llength $args] == 1} {
+                return {The sdcdb connector script connects OpenMSX to the SDCC debugger.
+Recognized commands: select, connect, disconnect, break, list, ucsim
+}
+        }
+        switch -- [lindex $args 1] {
+                "select" { return {Define location of the SDCDB program when not found in the PATH.
+
+Syntax: sdcdb select path
+}}
+                "connect" { return {Connects to the SDCDB debugger.
+
+Syntax: sdcdb connect ?src? target
+
+src is a list of directories where SDCDB looks for source code. target is the location of the IHX file created by SDCC and compiled with the -debug parameter.
+}}
+                "disconnect" { return {Disconnects and kill the SDCDB debugger.
+
+Syntax: sdcdb disconnect
+}}
+                "break" { return {Creates a breakpoint.
+
+Syntax: sdcdb break file:line
+
+file:line where the breakpoint will be created.
+}}
+                "list" { return {Lists contents of a source code file.
+
+Syntax: sdcdb list file:line
+}}
+}
+}
+
 proc output {args} {
     set chan stdout
     if {[llength $args] == 1} {
@@ -279,7 +314,7 @@ proc sdcdb_list {arg} {
 }
 
 proc sdcdb_ucsim {args} {
-    variable context ucsim
+    variable context output
     send_command ![join $args]
 }
 
