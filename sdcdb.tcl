@@ -166,7 +166,7 @@ proc sdcdb_connect {args} {
     } else {
         error "wrong # args: should be connect ?src? target"
     }
-    variable command [list $sdcdb -v -mz80 --directory=$srcpath $target]
+    variable command [list $sdcdb -v -mz80 --directory=$srcpath -z -b $target]
     warn "command: $command"
     variable context connection
     set pipe [open |$command [list RDWR NONBLOCK]]
