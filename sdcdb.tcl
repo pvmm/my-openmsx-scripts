@@ -39,6 +39,7 @@
 
 namespace eval sdcdb {
 
+set ::env(DEBUG) 1
 variable ucsim   {}
 variable target  {}
 variable pipe    0
@@ -96,7 +97,7 @@ proc output {args} {
 }
 
 proc warn {msg} {
-    if {[env DEBUG] ne 0} {
+    if {[env DEBUG]} {
         set chan stderr
         set msg [string map {"\n" "\\n"} $msg]
         puts $chan $msg
@@ -105,14 +106,14 @@ proc warn {msg} {
 }
 
 proc env {varname {defaults {}}} {
-        if {[info exists ::env($varname)]} {
-                return $::env($varname);
-        }
-        return $defaults;
+    if {[info exists ::env($varname)]} {
+        return $::env($varname);
+    }
+    return $defaults;
 }
 
 proc sdcdb {args} {
-    if {[env DEBUG] ne 0} {
+    if {[env DEBUG]} {
         if {[catch {dispatcher {*}$args} fid]} {
             puts stderr $::errorInfo
             error $::errorInfo
@@ -126,36 +127,55 @@ proc sdcdb {args} {
 proc dispatcher {args} {
     set params "[lrange $args 1 end]"
     switch -- [lindex $args 0] {
-        "select"    { return [sdcdb_select  {*}$params] }
-        "connect"   { return [sdcdb_connect {*}$params] }
-        "break"     { return [sdcdb_break   {*}$params] }
-        "list"      { return [sdcdb_list    {*}$params] }
-        "ucsim"     { return [sdcdb_ucsim   {*}$params] }
-        "sc"        { return [sdcdb_sc      {*}$params] }
-        default     { error "Unknown command \"[lindex $args 0]\"." }
+        "select"     { return [sdcdb_select     {*}$params] }
+        "connect"    { return [sdcdb_connect    {*}$params] }
+        "break"      { return [sdcdb_break      {*}$params] }
+        "list"       { return [sdcdb_list       {*}$params] }
+        "ucsim"      { return [sdcdb_ucsim      {*}$params] }
+        "sc"         { return [sdcdb_sc         {*}$params] }
+        "disconnect" { return [sdcdb_disconnect {*}$params] }
+        default      { error "Unknown command \"[lindex $args 0]\"." }
     }
 }
 
-proc sdcdb_select {p} {
-    variable sdcdb
-    if {[is_in_path $p] eq 0} {
-        error "SDCDB not a file or file not found"
-    }
-    set sdcdb $p
-}
-
-proc is_in_path {program} {
+proc file_in_path {program} {
     foreach dir [split $::env(PATH) ":"] {
-        if {[file executable [file join $dir $program]]} {
-            if {[file isfile $program]} { return 1 }
+        set path [file join $dir $program]
+        # a directory has executable permission
+        if {[file isfile $path] && [file executable $path]} {
+            return $path
         }
     }
-    return 0
+    return {}
+}
+
+proc sdcdb_select {path {msg {}}} {
+    variable pipe
+    if {$pipe ne 0} {
+        error "connection already stablished"
+    }
+    variable sdcdb
+    if {[file exists $path] && [file executable $path]} {
+        set sdcdb $path
+        return
+    }
+    if {$msg eq {}} {
+        set msg "SDCDB binary \"$path\" not found in PATH"
+    }
+    if {[file dirname $path] eq "."} {
+        set tmp [file_in_path $path]
+        if {$tmp ne {}} {
+            set sdcdb $tmp
+            return
+        }
+    }
+    error $msg
 }
 
 proc sdcdb_connect {args} {
     variable sdcdb
-    sdcdb_select $sdcdb
+    variable srcpath
+    sdcdb_select $sdcdb "Use \"sdcdb select <path>\" to point to the SDCDB binary"
     output "Opening SDCDB process..."
     variable pipe
     if {[llength $args] == 1} {
@@ -166,7 +186,7 @@ proc sdcdb_connect {args} {
     } else {
         error "wrong # args: should be connect ?src? target"
     }
-    variable command [list $sdcdb -v -mz80 --directory=$srcpath -z -b $target]
+    variable command [list $sdcdb -v -mz80 --directory=$srcpath $target -z -b]
     warn "command: $command"
     variable context connection
     set pipe [open |$command [list RDWR NONBLOCK]]
@@ -202,25 +222,39 @@ proc handle_output {} {
     warn "context is $context"
     switch -- $context {
         connection {
+            # Look for file "<>.ihx" pattern
             set pattern {file (\S+)}
             set matches [regexp -inline $pattern $response]
-            if {[llength $matches] > 0} {
-                variable target [lindex $matches 1]
-                output "$target target found"
+            if {[llength $matches] < 2} {
+                output "target not found"
+                sdcdb_disconnect
+                return
             }
-            # {\+ (\S+) -P -r 9756}
+            variable target [lindex $matches 1]
+            output "$target target found"
+            # Look for {\+ (\S+) -P -r 9756} pattern
             set pattern {\+ (\S+)}
             set matches [regexp -inline $pattern $response]
             if {[llength $matches] > 0} {
                 variable sdcdb
-                variable ucsim [lindex $matches 1]
-                warn "$ucsim simulator expected."
+                set filename [lindex $matches 1]
+                warn "$filename simulator expected."
                 set path [file dirname $sdcdb]
-                if {![file executable [file join $path $ucsim]]} {
-                    error "$ucsim simulator not found"
+                # look for ucsim in same directory of sdcdb
+                variable ucsim [file join $path $filename]
+                if {![file executable $ucsim]} {
+                    if {$path eq "."} {
+                        output "\"$filename\" simulator not found in PATH"
+                    } else {
+                        output "\"$filename\" simulator not found in \"$path\""
+                    }
+                    sdcdb_disconnect
+                    return
                 } else {
-                    output "$ucsim simulator found"
+                    output "\"$filename\" simulator found"
                 }
+            } else {
+                output "Parser error: simulator name not found"
             }
         }
         break0 {
@@ -242,7 +276,9 @@ proc handle_output {} {
                 set line    [lindex $matches 7]
                 output "[debug set_bp "0x$address"]: breakpoint at 0x$address"
             } else {
-                error "Parse error: breakpoint not found"
+                set context none
+                output "Parser error: breakpoint not found"
+                return
             }
             set context break2
             send_command "d$bpnum"
@@ -251,7 +287,7 @@ proc handle_output {} {
             set pattern {Deleted breakpoint (\d+)}
             set matches [regexp -inline $pattern $response]
             if {![llength $matches]} {
-                error "Parse error: breakpoint not found"
+                output "Parser error: breakpoint not found"
             }
             set context none
         }
