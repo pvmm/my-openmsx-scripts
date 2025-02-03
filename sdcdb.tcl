@@ -6,18 +6,11 @@
 #
 # The main difference between SDCDB connector's breakpoints and the built-in OpenMSX
 # breakpoints is the C code integration:
-# [ ] allow users to create breakpoints on C code:
+# [*] allow users to create breakpoints on C code:
 #     > sdcdb::break main.c:55
-# [ ] print contents of a C variable:
-#     > sdcdb::print status
-# [ ] print type of a C variable:
-#     > sdcdb::ptype status
-# [ ] step to next C instruction:
-#     > sdcdb::next
-# [ ] list current C line:
-#     > sdcdb::list.
-# [ ] list C source code at line 100:
+# [*] list C source code at line 100:
 #     > sdcdb::list main.c:100
+# [*] and more things to come (WIP).
 # 
 # Caveat: you need the sdcdb debugger and sz80 simulator (µCsim) from the SDCC compiler
 # collection to run SDCDB connector. Some package managers rename sz80 to ucsim_z80, so
@@ -36,8 +29,6 @@
 #       - close connection to SDCDB, killing the process.
 # break line
 #       - creates breakpoint in [LINE | FILE:LINE | *<address>]
-# clear line
-#       - deletes breakpoint in [LINE | FILE:LINE | *<address>]
 # list ?line?
 #       - list source code at [LINE | FILE:LINE | *<address>]
 # ucsim [COMMAND]
@@ -105,7 +96,6 @@ proc dispatcher {args} {
         "break"     { return [sdcdb_break   {*}$params] }
         "list"      { return [sdcdb_list    {*}$params] }
         "ucsim"     { return [sdcdb_ucsim   {*}$params] }
-        "test"      { return [sdcdb_test    {*}$params] }
         "sc"        { return [sdcdb_sc      {*}$params] }
         default     { error "Unknown command \"[lindex $args 0]\"." }
     }
@@ -166,12 +156,12 @@ proc handle_output {} {
     if {$response ne {}} {
         warn "response: {$response}"
         set empty 0
-    } elseif {$empty eq 0} {
-        warn "response: *empty*"
-        incr empty
     } elseif {$response eq $command} {
         warn "response: *repeat*"
         return
+    } elseif {$empty eq 0} {
+        warn "response: *empty*"
+        incr empty
     }
     variable context
     warn "context is $context"
@@ -198,14 +188,14 @@ proc handle_output {} {
                 }
             }
         }
-        "break0" {
+        break0 {
             # Breakpoint <n> at 0x<address>: file <file>.c, line <line>.
             #set pattern {Breakpoint (\d+) at 0x(\w+): file (\S+), line (\d+).}
             #set matches [regexp -inline $pattern $response]
-            send_command "info break"
             set context break1
+            send_command "info break"
         }
-        "break1" {
+        break1 {
             # Num Type           Disp Enb Address    What
             # 1   breakpoint     keep y   0x0000480d at main.c:52
             set pattern {(\d+)\s+(\S+)\s+(\S+)\s(\S)\s+0x(\S+) at ([^:]+):(\d+)}
@@ -216,20 +206,34 @@ proc handle_output {} {
                 set file    [lindex $matches 6]
                 set line    [lindex $matches 7]
                 output "[debug set_bp "0x$address"]: breakpoint at 0x$address"
-                set context none
             } else {
                 error "Parse error: breakpoint not found"
             }
+            set context break2
+            send_command "d$bpnum"
+        }
+        break2 {
+            set pattern {Deleted breakpoint (\d+)}
+            set matches [regexp -inline $pattern $response]
+            if {![llength $matches]} {
+                error "Parse error: breakpoint not found"
+            }
+            set context none
         }
         output {
             if {$response ne {}} {
                 output $response
             }
+            set context none
         }
         debug {
             if {$response ne {}} {
                 warn $response
             }
+            set context none
+        }
+        default {
+            set context none
         }
     }
 }
@@ -283,11 +287,6 @@ proc sdcdb_ucsim {args} {
 proc sdcdb_sc {args} {
     variable context output
     send_command [join $args]
-}
-
-proc sdcdb_test {} {
-    sdcdb_select /home/pedro/Projects/sdcc/sdcc/bin/sdcdb
-    sdcdb_connect ../../common:.:out out/arkanoid
 }
 
 namespace export sdcdb
