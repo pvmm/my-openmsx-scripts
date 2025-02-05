@@ -7,6 +7,7 @@ My collection of openMSX scripts
 * **_casrecorder.tcl**: simple script that appends binary/BASIC/ASCII file to a CAS file;
 * **vdpdebugger.tcl**: script that allow user to create watchpoints in VRAM;
 * **sdcdb.tcl**: SDCDB connector (WIP)
+* **server.tcl**: create a TCP/IP server inside OpenMSX
 
 ## very buggy/immature code/WIP
 * **codeanalyzer.tcl**: script that marks memory as CODE or DATA dynamically (as the program runs in OpenMSX). Useful for source code annotation;
