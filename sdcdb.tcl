@@ -1,36 +1,39 @@
-# SDCDB Debugger in Tcl - Version 1.0
+# SDCDB Debugger in Tcl - Version 0.6
 #
 # Copyright 2025 Pedro de Medeiros all rights reserved
 #
 # A debugger written in Tcl that uses `SDCC --debug` parameter to create breakpoints and much more.
 #
-# The main difference between SDCC Debugger's breakpoints and the built-in OpenMSX
-# breakpoints is the C code integration:
+# The main difference between SDCC Debugger's breakpoints and the built-in OpenMSX breakpoints is the
+# C code integration:
 # [*] allow users to create breakpoints on C code:
 #     > sdcdb break main.c:55
 # [*] list C source code at line 100:
 #     > sdcdb list main.c:100
 # [*] and more things to come (WIP).
 # 
-# Commands that the SDCDB Debugger recognizes directly. You may call them with sdcdb [COMMAND] [ARGS...]:
+# All commands that the SDCDB Debugger recognizes directly. You may call them with sdcdb [COMMAND] [ARGS...]:
 #
 # open path_to_CDB_file
 #       - Read CDB file specified by a path parameter
-# adddir path_to_source_dir
-#       - Scan directory for C source file
+# add path_to_source_dir
+#       - Scan directory for C source files
 # reload on|off|now
 #       - Turns on or off checking if CDB file has changed on disk every 10 seconds
-#         or force a reload.
-# quit
-#       - close CDB file and free all used memory
+#         or force a synchronous reload.
 # break line
 #       - creates breakpoint in <file>:<line>
 # list ?line?
 #       - list source code at <file>:<line>[-<line>]
 # step
-#       - Executes one line of C code, proceeding through subroutine calls.
+#       - Executes all lines of C code step by step, proceeding through subroutine calls.
 # next
-#       - Executes one line of C code, not following subroutine calls.
+#       - Executes next line of C code, not following subroutine calls.
+# info ?-break?
+#       - Display information on source code under the program counter. The -break
+#         parameter stops execution.
+# quit
+#       - close CDB file and free all used memory
 #
 # For more information about the CDB file format: https://sourceforge.net/p/sdcc/wiki/Home/
 
@@ -50,59 +53,74 @@ variable empty   0      ;# last response was empty?
 
 # new vars
 variable c_files        ;# pool of c source files
-variable c_files_ref    ;# C files reference
+variable c_files_count  ;# C files reference
 variable asm_files_ref  ;# ASM files reference
 variable cdb_path
 variable cdb_file
+
 array set mem {}        ;# find source from address
 array set global_a {}   ;# find address from source
 
 set_help_proc sdcdb [namespace code sdcdb_help]
 proc sdcdb_help {args} {
     if {[llength $args] == 1} {
-        return {The SDCDB debugger script connects OpenMSX to the CDB file created by SDCC.
-Recognized commands: open, add, reload, break, list, quit
+        return {The SDCDB debugger in Tcl connects OpenMSX to the CDB file created by SDCC.
+
+Recognized commands: open, add, reload, break, list, next, step, info, quit
+
+Type 'help sdcdb <command>' for more information about each command.
 }
     }
     switch -- [lindex $args 1] {
-        "open" { return {Opens CDB file and start debugging session.
+        "open" { return {Opens CDB file and start debugging session
 
 Syntax: sdcdb open path_to_cdb_file
 }}
-        "add" { return {Adds directory to be scanned for source files.
+        "add" { return {Adds directory to be scanned for source files
+
+'dir' is the path to a directory that will be scanned for more source files to be added to the database.
 
 Syntax: sdcdb add dir
-
-dir is the path to a directory that will be scanned for source code.
 }}
-        "reload" { return {Turns on/off file checking.
-Turn on/off checking if CDB file has changed and reload it if true. A 'now' parameter can be specified and it forces reloading instanteneously.
+        "reload" { return {Turns on/off file checking
+
+Turn on/off checking if CDB file has changed and reload it if true. A 'now' parameter can be specified and it forces instanteneous reloading.
 
 Syntax: cdb reload on|off|now
 }}
-        "break" { return {Creates a breakpoint.
-Create a OpenMSX breakpoint, but using the a C source file as reference.
+        "break" { return {Creates a breakpoint
+
+Create a OpenMSX breakpoint, but using the C source files as reference. 'sdcdb break' replaces 'debug break' with 'sdcdb info -break' for extra details about C code execution.
 
 Syntax: sdcdb break file:line
         sdcdb break file:functionName
         sdcdb break functionName
 }}
-        "list" { return {Lists contents of a C source file.
+        "list" { return {Lists contents of a C source file
+
 Without parameters, 'list' returns the C source code under the PC register.
 
 Syntax: sdcdb list file:line
         sdcdb list file:functionName
         sdcdb list functionName
 }}
-        "next" { return {Execute next line of C code.
-'next' will not proceed through subroutine calls.
+        "next" { return {Execute next line of C code
+
+The 'sdcdb next' command will not proceed through subroutine calls.
 
 Syntax: sdcdb next
 }}
-        "step" { return {Step through every line of C.
-'step' will proceed through subroutine calls.
+        "step" { return {Step through every line of C
+
+The 'sdcdb step' command will proceed through subroutine calls.
 
 Syntax: sdcdb step
+}}
+        "info" { return {Display information about current line of source code
+
+A '-break' parameter stops execution after displaying the information.
+
+Syntax: sdcdb info ?-break?
 }}
         "quit" { return {Closes CDB file and free all memory.
 
@@ -158,6 +176,7 @@ proc dispatcher {args} {
         "list"  { return [sdcdb_list       {*}$params] }
         "next"  { return [sdcdb_next       {*}$params] }
         step    { return [sdcdb_step       {*}$params] }
+        "info"  { return [sdcdb_info       {*}$params] }
         quit    { return [sdcdb_quit       {*}$params] }
         default      { error "Unknown command \"[lindex $args 0]\"." }
     }
@@ -216,7 +235,7 @@ proc complete {label name list} {
 }
 
 proc read_cdb {fname} {
-    variable c_files_ref
+    variable c_files_count
     variable mem
     set fh [open $fname "r"]
     # function pattern: search for "F:G$function_name$..." lines
@@ -257,8 +276,8 @@ proc read_cdb {fname} {
         set match [regexp -inline $line_pat $line]
         if {[llength $match] == 6} {
             lassign $match {} filename linenum {} {} address
-            incr c_files_ref($filename)
-            if {$c_files_ref($filename) eq 1} { warn "Added C file '$filename'" }
+            incr c_files_count($filename)
+            if {$c_files_count($filename) eq 1} { warn "Added C file '$filename'" }
             # Put line -> address mapping of array with dynamic name
             set rootname [file rootname $filename]
             upvar ${rootname}_c var
@@ -325,7 +344,7 @@ proc read_cdb {fname} {
         ;#warn "Ignored '$line'"
     }
     close $fh
-    output "[array size c_files_ref] C files references added"
+    output "[array size c_files_count] C files references added"
     output "$c_count C source lines found"
     output "$gf_count global function(s) registered"
     output "$sf_count static function(s) registered"
@@ -524,7 +543,7 @@ proc sdcdb_disconnect {} {
     set pipe 0
 }
 
-proc sdcdb_break {pos {cond {}} {cmd {debug break}}} {
+proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set pattern1 {([^:]+):(\d+)}
     set pattern2 {([^:]+):(\S+)}
     set pattern3 {(\S+)}
@@ -534,9 +553,9 @@ proc sdcdb_break {pos {cond {}} {cmd {debug break}}} {
         set arrayname [file rootname $filename]
         upvar ${arrayname}_c var
         variable var
-	if {![info exists var]} {
+        if {![info exists var]} {
             error "source file not found"
-	}
+        }
         set address [array get var $linenum]
         if {$address ne {}} {
             return [debug breakpoint create -address [lindex $address 1] -condition $cond -command $cmd]
@@ -551,9 +570,9 @@ proc sdcdb_break {pos {cond {}} {cmd {debug break}}} {
         set arrayname [file rootname $filename]
         upvar ${arrayname}_c var
         variable var
-	if {![info exists var]} {
+        if {![info exists var]} {
             error "source file not found"
-	}
+        }
         set record [array get var $funcname]
         if {$record eq {}} {
             # not found, search globally
@@ -580,6 +599,23 @@ proc sdcdb_break {pos {cond {}} {cmd {debug break}}} {
         }
     } else {
         error "error parsing break command"
+    }
+}
+
+proc sdcdb_info {arg} {
+    variable mem
+    set address [reg pc]
+    if {[array get mem $pc] ne {}} {
+        lassign $mem($pc) filename linenum
+        if {[array get c_files $filename] eq {}} {
+            error "Cannot localize source code file: '$filename' missing. Use 'sdcdb add <path>' to add more source files to the database."
+        }
+        # TODO: list file
+    } else {
+        error "address mapping not found for 0x[format %04x $address]"
+    }
+    if {arg eq "-break"} {
+        debug break
     }
 }
 
