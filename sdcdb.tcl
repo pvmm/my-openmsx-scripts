@@ -25,10 +25,11 @@
 #       - creates breakpoint in <file>:<line>
 # list ?line?
 #       - list source code at <file>:<line>[-<line>]
-# step
-#       - Executes all lines of C code step by step, proceeding through subroutine calls.
-# next
-#       - Executes next line of C code, not following subroutine calls.
+# step ?n?
+#       - Executes next n lines of C code step by step, proceeding through subroutine calls.
+#         n defaults to 1.
+# next ?n?
+#       - Executes next n lines of C code, not following subroutine calls. n defaults to 1.
 # info ?-break?
 #       - Display information on source code under the program counter. The -break
 #         parameter stops execution.
@@ -92,17 +93,17 @@ Syntax: sdcdb list <file>:<line>
         sdcdb list <file>:<functionName>
         sdcdb list <functionName>
 }}
-        "next" { return {Executes next line of C code
+        "next" { return {Executes next n lines of C code
 
-The 'sdcdb next' command will not proceed through subroutine calls.
+The 'sdcdb next' command will not proceed through subroutine calls. You may specify how many times 'sdcdb next' should execute (defaults to 1).
 
-Syntax: sdcdb next
+Syntax: sdcdb next ?n?
 }}
-        "step" { return {Steps through every line of C
+        "step" { return {Steps through next n lines of C code
 
-The 'sdcdb step' command will proceed through subroutine calls.
+The 'sdcdb step' command will proceed through subroutine calls. You may specify how many times 'sdcdb step' should execute (defaults to 1).
 
-Syntax: sdcdb step
+Syntax: sdcdb step ?n?
 }}
         "info" { return {Displays information about current line of source code
 
@@ -329,13 +330,23 @@ proc sdcdb_add {path} {
 }
 
 proc sdcdb_list {arg} {
-    set pattern {([^:]+):(\d+)?(-(\d+))}
-    set match [regexp -inline $pattern $arg]
-    if {[llength $match] > 1} {
-        lassign $match file start end
-        list_file $file $start $end
-    } else {
-        error "syntax error"
+    set pattern1 {([^:]+):(\d+)?(-(\d+))}
+    set pattern2 {([^:]+):(\S+)}
+    set pattern3 {(\S+)}
+    set match [regexp -inline $pattern1 $arg]
+    if {[llength $match] == 4} {
+        lassign $match {} filename start end
+        return list_file $filename $start $end
+    }
+    set match [regexp -inline $pattern2 $arg]
+    if {[llength $match] == 3} {
+        lassign $match {} filename funcname
+        # TODO: list_function
+    }
+    set match [regexp -inline $pattern3 $arg]
+    if {[llength $match] == 2} {
+        lassign $match {} funcname
+        # TODO: list_function
     }
     # TODO: scan mem near PC to find C source file and lineno.
 }
@@ -348,6 +359,55 @@ proc list_file {file start {end {}}} {
     # TODO: open file and list its source line by line at [start:end]
 }
 
+# scan file database then global database for function name
+proc scanfunc {filename funcname} {
+    set arrayname [file rootname $filename]
+    upvar ${arrayname}_c var
+    variable var
+    if {![info exists var]} {
+        error "source file not found"
+    }
+    set record [array get var $funcname]
+    if {$record eq {}} {
+        # not found in file, search globally
+        variable global_a
+        set record [array get global_a $funcname]
+    }
+    return [eval list [lindex $record 1]]
+}
+
+# reverse function search (global first, then search all files)
+proc scanfunc_r {funcname} {
+    variable global_a
+    set record [array get global_a $funcname]
+    if {$record eq {}} {
+        foreach filename in c_files {
+            set label [file rootname $filename]
+            upvar ${label}_c var
+            variable var
+            if {[info exists var($funcname)]} {
+                set record [array get var $line]
+                break
+            }
+        }
+    }
+    return [lindex $record 1]
+}
+
+proc scanline {file line} {
+    set label [file rootname $file]
+    upvar ${label}_c var
+    variable var
+    if {![info exists var]} {
+        error "source file not found"
+    }
+    set record [array get var $line]
+    if {$record eq {}} {
+        error "line $line not found in file '$file'"
+    }
+    return [lindex $record 1]
+}
+
 proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set pattern1 {([^:]+):(\d+)}
     set pattern2 {([^:]+):(\S+)}
@@ -355,38 +415,19 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern1 $pos]
     if {[llength $match] == 3} {
         lassign $match {} filename linenum
-        set arrayname [file rootname $filename]
-        upvar ${arrayname}_c var
-        variable var
-        if {![info exists var]} {
-            error "source file not found"
-        }
-        set address [array get var $linenum]
+        set address [scanline $filename $linenum]
         if {$address ne {}} {
-            return [debug breakpoint create -address [lindex $address 1] -condition $cond -command $cmd]
+            return [debug breakpoint create -address $address -condition $cond -command $cmd]
         } else {
             error "address not found"
         }
-        return {}
     }
     set match [regexp -inline $pattern2 $pos]
     if {[llength $match] == 3} {
         lassign $match {} filename funcname
-        set arrayname [file rootname $filename]
-        upvar ${arrayname}_c var
-        variable var
-        if {![info exists var]} {
-            error "source file not found"
-        }
-        set record [array get var $funcname]
-        if {$record eq {}} {
-            # not found, search globally
-            variable global_a
-            set record [array get global_a $funcname]
-        }
-        if {$record ne {}} {
-            set record [eval list [lindex $record 1]]
-            return [debug breakpoint create -address [lindex $record 1] -condition $cond -command $cmd]
+        set address [scanfunc $filename $funcname]
+        if {$address ne {}} {
+            return [debug breakpoint create -address $address -condition $cond -command $cmd]
         } else {
             error "function not found"
         }
@@ -394,16 +435,48 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern3 $pos]
     if {[llength $match] == 2} {
         lassign $match {} funcname
-        variable global_a
-        set record [array get global_a $funcname]
-        if {$record ne {}} {
-            set record [eval list [lindex $record 1]]
-            return [debug breakpoint create -address [lindex $record 1] -condition $cond -command $cmd]
-        } else {
+        set address [scanfunc_r $funcname]
+        if {address eq {}} {
             error "function not found"
         }
+        return [debug breakpoint create -address $address -condition $cond -command $cmd]
     } else {
         error "error parsing break command"
+    }
+}
+
+proc sdcdb_next {{times 1}} {
+    debug break  ;# just to be sure
+    for {set i $times} {$i > 0} {decr i} {
+        do_debug_step over
+    }
+}
+
+proc sdcdb_step {{times 1} {next {}}} {
+    debug break  ;# just to be sure
+    for {set i $times} {$i > 0} {decr i} {
+        do_debug_step in
+    }
+}
+
+proc do_debug_step {{type {}}} {
+    variable mem
+    set once 0
+    if {[array get mem [reg pc] ne {}} {
+        lassign $mem($address) {} file {} line
+        set count 0
+        while {new_file eq file && new_line eq line} {
+            if {$type eq over} { step over } else { step in }
+            lassign $mem([rec pc]) {} new_file {} new_line
+            incr count
+            if {new_line eq {} && !$once} {
+                output "no debug information at this level, skipping until there is."
+                incr once
+            }
+        }
+        output "$count ML instructions passed"
+    } else {
+        output "no debug information at this level, stopping."
     }
 }
 
@@ -415,7 +488,7 @@ proc sdcdb_info {arg} {
         if {[array get c_files $filename] eq {}} {
             error "Cannot localize source code file: '$filename' missing. Use 'sdcdb add <path>' to add more source files to the database."
         }
-        # TODO: list file
+        sdcdb_list linenum
     } else {
         error "address mapping not found for 0x[format %04x $address]"
     }
