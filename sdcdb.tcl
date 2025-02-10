@@ -200,22 +200,49 @@ proc sdcdb_open {path} {
 
 proc complete {label name list} {
     upvar $label var
+    if {![info exists var($name)]} { warn "$label\($name\) ignored"; return 0 }
     set var($name) [concat $var($name) $list]
+    return 1
 }
 
 proc read_cdb {fname} {
     variable c_files_ref
     variable mem
     set fh [open $fname "r"]
-    # file line pattern: search for "L:C$filename$line$level$block:address" lines
-    set f_line_pat {^L:C\$([^$]+)\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
+    # function pattern: search for "F:G$function_name$..." lines
+    # 'F:G$debug_break$0_0$0({2}DF,SV:S),Z,0,0,0,0,0'
+    set func_pat {^F:(G|F([^$]+)|L([^$]+))\$([^$]+)\$.*}
+    # line number pattern: search for "L:C$filename$line$level$block:address" lines
+    set line_pat {^L:C\$([^$]+)\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
     # function begin pattern: search for "L:(G|F<name>|L<name>)$function$level$block:address" lines
     set func_bn_pat {^L:(G|F([^$]+)|L([^$]+))\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
     # function end pattern: search for "L:X(G|F<name>|L<name>)$function$level$block:address" lines
     set func_ed_pat {^L:X(G|F([^$]+)|L([^$]+))\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
     set count 0
     while {[gets $fh line] != -1} {
-        set match [regexp -inline $f_line_pat $line]
+        set match [regexp -inline $func_pat $line]
+        if {[llength $match] == 5} {
+            lassign $match {} context {} {} name
+            switch -- [string index $context 0] {
+                G {
+                    variable global_a
+                    set global_a($name) {}
+                    warn "global_a($name): $global_a($name)"
+                }
+                F {
+                    set filename [string range $context 1 [string length $context]]
+                    upvar {$filename_a} var
+                    global var
+                    set var($name) {}
+                    warn "${filename}_a($name): $var($name)"
+                }
+                L {
+                    error "not implemented yet '$line' \[1\]"
+                }
+            }
+            continue
+        }
+        set match [regexp -inline $line_pat $line]
         if {[llength $match] == 6} {
             lassign $match {} filename linenum {} {} address
             incr c_files_ref($filename)
@@ -238,17 +265,20 @@ proc read_cdb {fname} {
             switch -- [string index $context 0] {
                 G {
                     variable global_a
-                    set global_a($name) [list begin $address]
-                    warn "global_a($name): $global_a($name)"
+                    if {[complete global_a $name [list begin $address]]} {
+                        warn "global_a($name): $global_a($name)"
+                    }
                 }
                 F {
                     set filename [string range $context 1 [string length $context]]
                     upvar {$filename_a} var
                     global var
-                    set var($name) [list begin $address]
-                    warn "${filename}_a($name): $var($name)"
+                    if {[complete var $name [list begin $address]]} {
+                        warn "${filename}_a($name): $var($name)"
+                    }
                 }
                 L {
+                    ;#error "not implemented yet '$line' \[2\]"
                 }
             }
             continue
@@ -260,22 +290,25 @@ proc read_cdb {fname} {
             switch -- [string index $context 0] {
                 G {
                     variable global_a
-                    complete global_a $name [list end $address]
-                    warn "X: global_a($name): $global_a($name)"
+                    if {[complete global_a $name [list end $address]]} {
+                        warn "X: global_a($name): $global_a($name)"
+                    }
                 }
                 F {
                     set filename [string range $context 1 [string length $context]]
                     upvar {$filename_a} var
                     global var
-                    complete var $name [list end $address]
-                    warn "X: ${filename}_a($name): $var($name)"
+                    if {[complete var $name [list end $address]]} {
+                        warn "X: ${filename}_a($name): $var($name)"
+                    }
                 }
                 L {
+                    error "not implemented yet '$line' \[3\]"
                 }
             }
             continue
         }
-        warn "Ignored '$line'"
+        ;#warn "Ignored '$line'"
     }
     close $fh
     warn "[array size c_files_ref] C files references added"
@@ -286,7 +319,13 @@ proc sdcdb_add {path} {
     set new_files [glob -type f -directory $path *.c]
     warn "adding files: [join $new_files {, }]"
     variable c_files
-    lappend c_files {*}$new_files
+    foreach path $new_files {
+        set filename [file tail $path]
+        if {[array get c_files $filename] ne {}} {
+            warn "file '$filename' already registered, new entry ignored."
+        }
+        set c_files($filename) $path
+    }
 }
 
 proc sdcdb_list {arg} {
@@ -306,9 +345,8 @@ proc sdcdb_list. {} {
 
 proc list_file {file start {end {}}} {
     variable c_files
-    set index [lsearch $c_files $file]
-    if {$index eq -1} {
-        error "file not found in source list, add a directory that contains such file with 'sdcdb addsrc <dir>'"
+    if {[array get c_files $file] eq {}} {
+        error "file not found in source list, add a directory that contains such file with 'sdcdb add <dir>'"
     }
     # TODO: list file source
 }
