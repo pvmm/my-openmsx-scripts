@@ -352,10 +352,24 @@ proc sdcdb_list {arg} {
 
 proc list_file {file start {end {}}} {
     variable c_files
-    if {[array get c_files $file] eq {}} {
-        error "file not found in source list, add a directory that contains such file with 'sdcdb add <dir>'"
+    set record [array get c_files $file]
+    if {$record eq {}} {
+        error "file '$file' not found in source list, add a directory that contains such file with 'sdcdb add <dir>'"
     }
-    # TODO: open file and list its source line by line at [start:end]
+    set fh [open [lindex $record 1] r]
+    set count 0
+    # 10 lines by default
+    if {$end eq {}} { set end [expr $start + 9] }
+    while {[gets $fh line] >= 0} {
+        incr count
+        if {$count >= $start} {
+            output "[format %5d $count]:    $line"
+        }
+        if {$count >= $end} {
+            break
+        }
+    }
+    close $fh
 }
 
 # scan file database then global database for function name
