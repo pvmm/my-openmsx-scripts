@@ -40,18 +40,6 @@
 namespace eval sdcdb {
 
 set ::env(DEBUG) 1
-variable ucsim   {}
-variable target  {}
-variable pipe    0
-variable sdcdb   sdcdb  ;# path to sdcdb
-variable message ""
-variable context none
-variable srcpath .
-variable context {}
-variable command        ;# last command sent to debugger
-variable empty   0      ;# last response was empty?
-
-# new vars
 variable c_files        ;# pool of c source files
 variable c_files_count  ;# C files reference
 variable asm_files_ref  ;# ASM files reference
@@ -74,13 +62,13 @@ Type 'help sdcdb <command>' for more information about each command.
     switch -- [lindex $args 1] {
         "open" { return {Opens CDB file and start debugging session
 
-Syntax: sdcdb open path_to_cdb_file
+Syntax: sdcdb open <pathToCDBFile>
 }}
         "add" { return {Adds directory to be scanned for source files
 
 'dir' is the path to a directory that will be scanned for more source files to be added to the database.
 
-Syntax: sdcdb add dir
+Syntax: sdcdb add <dir>
 }}
         "reload" { return {Turns on/off file checking
 
@@ -90,39 +78,39 @@ Syntax: cdb reload on|off|now
 }}
         "break" { return {Creates a breakpoint
 
-Create a OpenMSX breakpoint, but using the C source files as reference. 'sdcdb break' replaces 'debug break' with 'sdcdb info -break' for extra details about C code execution.
+Create a OpenMSX breakpoint, but using the C source files as reference. 'sdcdb info -break' replaces 'debug break' for extra details about C code execution.
 
-Syntax: sdcdb break file:line
-        sdcdb break file:functionName
-        sdcdb break functionName
+Syntax: sdcdb break <file>:<line>
+        sdcdb break <file>:<functionName>
+        sdcdb break <functionName>
 }}
         "list" { return {Lists contents of a C source file
 
-Without parameters, 'list' returns the C source code under the PC register.
+Without parameters, 'sdcdb list' returns the C source code under the PC register.
 
-Syntax: sdcdb list file:line
-        sdcdb list file:functionName
-        sdcdb list functionName
+Syntax: sdcdb list <file>:<line>
+        sdcdb list <file>:<functionName>
+        sdcdb list <functionName>
 }}
-        "next" { return {Execute next line of C code
+        "next" { return {Executes next line of C code
 
 The 'sdcdb next' command will not proceed through subroutine calls.
 
 Syntax: sdcdb next
 }}
-        "step" { return {Step through every line of C
+        "step" { return {Steps through every line of C
 
 The 'sdcdb step' command will proceed through subroutine calls.
 
 Syntax: sdcdb step
 }}
-        "info" { return {Display information about current line of source code
+        "info" { return {Displays information about current line of source code
 
 A '-break' parameter stops execution after displaying the information.
 
 Syntax: sdcdb info ?-break?
 }}
-        "quit" { return {Closes CDB file and free all memory.
+        "quit" { return {Closes files and frees all memory.
 
 Syntax: sdcdb quit}}
     }
@@ -193,33 +181,10 @@ proc file_in_path {program} {
     return {}
 }
 
-proc sdcdb_select {path {msg {}}} {
-    variable pipe
-    if {$pipe ne 0} {
-        error "connection already established"
-    }
-    variable sdcdb
-    if {[file exists $path] && [file executable $path]} {
-        set sdcdb $path
-        return
-    }
-    if {$msg eq {}} {
-        set msg "SDCDB binary \"$path\" not found in PATH"
-    }
-    if {[file dirname $path] eq "."} {
-        set tmp [file_in_path $path]
-        if {$tmp ne {}} {
-            set sdcdb $tmp
-            return
-        }
-    }
-    error $msg
-}
-
 proc sdcdb_open {path} {
     set file [glob -type f -directory $path *.cdb]
     if {[llength $file] ne 1} {
-        error "unique and valid CDB file not found"
+        error "unique regular CDB file not found"
     }
     variable cdb_path $path
     variable cdb_file $file
@@ -268,7 +233,7 @@ proc read_cdb {fname} {
                     warn "${filename}_a\($funcname\) created"
                 }
                 L {
-                    error "not implemented yet '$line' \[1\]"
+                    ;#error "not implemented yet '$line' \[1\]"
                 }
             }
             continue
@@ -336,7 +301,7 @@ proc read_cdb {fname} {
                     }
                 }
                 L {
-                    error "not implemented yet '$line' \[3\]"
+                    ;#error "not implemented yet '$line' \[3\]"
                 }
             }
             continue
@@ -372,9 +337,6 @@ proc sdcdb_list {arg} {
     } else {
         error "syntax error"
     }
-}
-
-proc sdcdb_list. {} {
     # TODO: scan mem near PC to find C source file and lineno.
 }
 
@@ -383,164 +345,7 @@ proc list_file {file start {end {}}} {
     if {[array get c_files $file] eq {}} {
         error "file not found in source list, add a directory that contains such file with 'sdcdb add <dir>'"
     }
-    # TODO: list file source
-}
-
-proc sdcdb_connect {args} {
-    variable sdcdb
-    variable srcpath
-    sdcdb_select $sdcdb "Use \"sdcdb select <path>\" to point to the SDCDB binary"
-    output "Opening SDCDB process..."
-    variable pipe
-    if {[llength $args] == 1} {
-        set target [lindex $args 0]
-    } elseif {[llength $args] == 2} {
-        lassign $args srcpath target
-    } else {
-        error "wrong # args: should be connect ?src? target"
-    }
-    variable command [list $sdcdb -v -mz80 --directory=$srcpath $target -z -b]
-    warn "command: $command"
-    variable context connection
-    set pipe [open |$command [list RDWR NONBLOCK]]
-    fconfigure $pipe -blocking 0 -buffering line
-    fileevent $pipe readable [list sdcdb::handle_output]
-}
-
-proc handle_output {} {
-    variable pipe
-    if {[eof $pipe]} {
-        output "SDCDB process died."
-        fileevent $pipe readable {}
-        close $pipe
-        variable pipe 0
-        return
-    }
-    set response [read $pipe]
-    set response [string trimright $response "(sdcdb) "]
-    set response [string trimright $response "\n"]
-    variable empty
-    variable command
-    if {$response ne {}} {
-        warn "response: {$response}"
-        set empty 0
-    } elseif {$response eq $command} {
-        warn "response: *repeat*"
-        return
-    } elseif {$empty eq 0} {
-        warn "response: *empty*"
-        incr empty
-    }
-    variable context
-    warn "context is $context"
-    switch -- $context {
-        connection {
-            # Look for file "<>.ihx" pattern
-            set pattern {file (\S+)}
-            set matches [regexp -inline $pattern $response]
-            if {[llength $matches] < 2} {
-                output "target not found"
-                sdcdb_disconnect
-                return
-            }
-            variable target [lindex $matches 1]
-            output "$target target found"
-            # Look for {\+ (\S+) -P -r 9756} pattern
-            set pattern {\+ (\S+)}
-            set matches [regexp -inline $pattern $response]
-            if {[llength $matches] > 0} {
-                variable sdcdb
-                set filename [lindex $matches 1]
-                warn "$filename simulator expected."
-                set path [file dirname $sdcdb]
-                # look for ucsim in same directory of sdcdb
-                variable ucsim [file join $path $filename]
-                if {![file executable $ucsim]} {
-                    if {$path eq "."} {
-                        output "\"$filename\" simulator not found in PATH"
-                    } else {
-                        output "\"$filename\" simulator not found in \"$path\""
-                    }
-                    sdcdb_disconnect
-                    return
-                } else {
-                    output "\"$filename\" simulator found"
-                }
-                ;#send_command "set opt 8 f"
-            } else {
-                output "Parser error: simulator name not found"
-            }
-        }
-        break0 {
-            # Breakpoint <n> at 0x<address>: file <file>.c, line <line>.
-            #set pattern {Breakpoint (\d+) at 0x(\w+): file (\S+), line (\d+).}
-            #set matches [regexp -inline $pattern $response]
-            set context break1
-            send_command "info break"
-        }
-        break1 {
-            # Num Type           Disp Enb Address    What
-            # 1   breakpoint     keep y   0x0000480d at main.c:52
-            set pattern {(\d+)\s+(\S+)\s+(\S+)\s(\S)\s+0x(\S+) at ([^:]+):(\d+)}
-            set matches [regexp -inline $pattern $response]
-            if {[llength $matches] > 0} {
-                lassign $matches {} bpnum {} {} {} address file line
-                output "[debug set_bp "0x$address"]: breakpoint at 0x$address"
-            } else {
-                set context none
-                output "Parser error: breakpoint not found"
-                return
-            }
-            set context break2
-            send_command "d$bpnum"
-        }
-        break2 {
-            set pattern {Deleted breakpoint (\d+)}
-            set matches [regexp -inline $pattern $response]
-            if {![llength $matches]} {
-                output "Parser error: breakpoint not found"
-            }
-            set context none
-        }
-        output {
-            if {$response ne {}} {
-                output $response
-            }
-            set context none
-        }
-        debug {
-            if {$response ne {}} {
-                warn $response
-            }
-            set context none
-        }
-        default {
-            set context none
-        }
-    }
-}
-
-proc send_command {cmd} {
-    warn "send_command($cmd)"
-    variable pipe
-    if {$pipe eq 0} {
-        error "SDCDB connection not found, call connect first."
-    }
-    if {[catch {puts $pipe [string trimright $cmd "\n"]; flush $pipe} err]} {
-        output "Error sending command: $err"
-    }
-    variable command $cmd
-}
-
-proc sdcdb_disconnect {} {
-    variable pipe
-    if {$pipe eq 0} {
-        error "SDCDB connection not found, call connect first."
-    }
-    fileevent $pipe readable {}
-    close $pipe
-    output "SDCDB process closed."
-    set pipe 0
+    # TODO: open file and list its source line by line at [start:end]
 }
 
 proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
@@ -617,17 +422,6 @@ proc sdcdb_info {arg} {
     if {arg eq "-break"} {
         debug break
     }
-}
-
-proc sdcdb_ucsim {args} {
-    variable context output
-    send_command ![join $args]
-}
-
-# direct access to send_command
-proc sdcdb_sc {args} {
-    variable context output
-    send_command [join $args]
 }
 
 namespace export sdcdb
