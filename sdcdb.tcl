@@ -64,7 +64,7 @@ Syntax: sdcdb open <pathToCDBFile>
 }}
         "add" { return {Adds directory to be scanned for source files
 
-'dir' is the path to a directory that will be scanned for more source files to be added to the database.
+'dir' is the path to a directory that will be scanned for more source files to be added to the source database.
 
 Syntax: sdcdb add <dir>
 }}
@@ -242,13 +242,13 @@ proc read_cdb {fname} {
         if {[llength $match] == 6} {
             lassign $match {} filename linenum {} {} address
             incr c_files_count($filename)
-            if {$c_files_count($filename) eq 1} { warn "Added C file '$filename'" }
             # Put line -> address mapping of array with dynamic name
             set arrayname [file rootname $filename]2addr
+            if {$c_files_count($filename) eq 1} { warn "Added C file '$arrayname'" }
             upvar ${arrayname} var
             variable var
-            set var($linenum) $address
-            set addr2file($address) { file $filename line $linenum }
+            set var($linenum) [expr 0x$address]
+            set addr2file([expr 0x$address]) [list file $filename line $linenum]
             warn "${arrayname}\($linenum\): $var($linenum)"
             incr c_count
             continue
@@ -380,6 +380,7 @@ proc scanfunc_r {funcname} {
     variable g_file2addr
     set record [lindex [array get g_file2addr $funcname] 1]
     if {$record eq {}} {
+        variable c_files
         foreach filename c_files {
             set arrayname [file rootname $filename]2addr
             upvar ${arrayname} var
@@ -414,7 +415,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern1 $pos]
     if {[llength $match] == 3} {
         lassign $match {} filename linenum
-	output $match: $filename $linenum
+        output $match: $filename $linenum
         set address [scanline $filename $linenum]
         if {$address ne {}} {
             return [debug breakpoint create -address 0x$address -condition $cond -command $cmd]
@@ -425,7 +426,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern2 $pos]
     if {[llength $match] == 3} {
         lassign $match {} filename funcname
-	output $match: $filename $funcname
+        output $match: $filename $funcname
         set address [scanfunc $filename $funcname]
         if {$address ne {}} {
             return [debug breakpoint create -address 0x$address -condition $cond -command $cmd]
@@ -436,7 +437,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern3 $pos]
     if {[llength $match] == 2} {
         lassign $match {} funcname
-	output $match: $funcname
+        output $match: $funcname
         set address [scanfunc_r $funcname]
         if {$address eq {}} {
             error "function not found"
@@ -485,13 +486,18 @@ proc do_debug_step {{type {}}} {
 proc print_info {} {
     variable addr2file
     if {[array get addr2file [reg PC]] ne {}} {
-        lassign $addr2file([reg PC]) filename linenum
-        if {[array get c_files $filename] eq {}} {
-            error "Cannot localize source code file: '$filename' missing. Use 'sdcdb add <path>' to add more source files to the database."
+        lassign $addr2file([reg PC]) {} file {} line
+        if {$file eq {}} {
+            error "address [format %04X [reg PC]] not found in database."
         }
-        sdcdb_list linenum
+        variable c_files
+        if {[array get c_files $file] eq {}} {
+            output c_files: [array get c_files]
+            error "Cannot localize source code file: '$file' missing.\nUse 'sdcdb add <path>' to add more source files to the source database."
+        }
+        list_file $file $line
     } else {
-        error "address mapping not found for 0x[format %04x [reg PC]]"
+        error "line mapping not found for 0x[format %04X [reg PC]]"
     }
 }
 
@@ -500,7 +506,7 @@ proc sdcdb_info {arg} {
         debug break
     }
     if {[catch {print_info} fid]} {
-	output $fid
+        output $fid
     }
 }
 
