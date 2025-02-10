@@ -218,7 +218,9 @@ proc read_cdb {fname} {
     set func_bn_pat {^L:(G|F([^$]+)|L([^$]+))\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
     # function end pattern: search for "L:X(G|F<name>|L<name>)$function$level$block:address" lines
     set func_ed_pat {^L:X(G|F([^$]+)|L([^$]+))\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
-    set count 0
+    set c_count 0  ;# lines of C code
+    set gf_count 0 ;# global functions
+    set sf_count 0 ;# static functions
     while {[gets $fh line] != -1} {
         set match [regexp -inline $func_pat $line]
         if {[llength $match] == 5} {
@@ -254,7 +256,7 @@ proc read_cdb {fname} {
             set var($linenum) $address
             set mem($address) { file $filename line $linenum }
             warn "${rootname}_c($linenum): $var($linenum)"
-            incr count
+            incr c_count
             continue
         }
         set match [regexp -inline $func_bn_pat $line]
@@ -267,6 +269,7 @@ proc read_cdb {fname} {
                     variable global_a
                     if {[complete global_a $name [list begin $address]]} {
                         warn "global_a($name): $global_a($name)"
+                        incr gf_count
                     }
                 }
                 F {
@@ -275,6 +278,7 @@ proc read_cdb {fname} {
                     global var
                     if {[complete var $name [list begin $address]]} {
                         warn "${filename}_a($name): $var($name)"
+                        incr sf_count
                     }
                 }
                 L {
@@ -311,8 +315,10 @@ proc read_cdb {fname} {
         ;#warn "Ignored '$line'"
     }
     close $fh
-    warn "[array size c_files_ref] C files references added"
-    warn "$count lines found"
+    output "[array size c_files_ref] C files references added"
+    output "$c_count C source lines found"
+    output "$gf_count global functions registered"
+    output "$sf_count static functions registered"
 }
 
 proc sdcdb_add {path} {
