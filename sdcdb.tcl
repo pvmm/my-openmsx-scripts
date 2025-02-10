@@ -54,51 +54,50 @@ variable c_files_ref    ;# C files reference
 variable asm_files_ref  ;# ASM files reference
 variable cdb_path
 variable cdb_file
-variable mem            ;# find source from address
+array set mem {}        ;# find source from address
 
 set_help_proc sdcdb [namespace code sdcdb_help]
 proc sdcdb_help {args} {
-        if {[llength $args] == 1} {
-                return {The cdb reader script connects OpenMSX to the CDB file created by SDCC.
-Recognized commands: open, adddir, reload, break, list, quit
+    if {[llength $args] == 1} {
+        return {The SDCDB debugger script connects OpenMSX to the CDB file created by SDCC.
+Recognized commands: open, add, reload, break, list, quit
 }
-        }
-        switch -- [lindex $args 1] {
-                "open" { return {Open CDB file and start debugging session.
+    }
+    switch -- [lindex $args 1] {
+        "open" { return {Opens CDB file and start debugging session.
 
 Syntax: sdcdb open path_to_cdb_file
 }}
-                "add_dir" { return {Scan directory for source files.
+        "add" { return {Adds directory to be scanned for source files.
 
-Syntax: sdcdb add_dir dir
+Syntax: sdcdb add dir
 
-dir is a directory that will be scanned for source code.
+dir is the path to a directory that will be scanned for source code.
 }}
-                "reload" { return {Turn on/off file checking.
+        "reload" { return {Turns on/off file checking.
 Turn on/off checking if CDB file has changed and reload it if true. A 'now' parameter can be specified and it forces reloading instanteneously.
 
 Syntax: cdb reload on|off|now
 }}
-                "break" { return {Creates a breakpoint.
+        "break" { return {Creates a breakpoint.
 Create a OpenMSX breakpoint, but using the a C source file as reference.
 
 Syntax: sdcdb break file:line
 
 file:line where the breakpoint will be created.
 }}
-                "list" { return {Lists contents of a C source file.
+        "list" { return {Lists contents of a C source file.
 
 Syntax: sdcdb list file:line
 }}
-                "list." { return {Lists contents of C source at the PC register.
+        "list." { return {Lists contents of C source under the PC register.
 
 Syntax: sdcdb list.
 }}
-                "quit" { return {Close CDB file and free all memory.
+        "quit" { return {Closes CDB file and free all memory.
 
-Syntax: sdcdb quit
-}}
-}
+Syntax: sdcdb quit}}
+    }
 }
 
 proc output {args} {
@@ -142,14 +141,14 @@ proc sdcdb {args} {
 proc dispatcher {args} {
     set params "[lrange $args 1 end]"
     switch -- [lindex $args 0] {
-        "open"       { return [sdcdb_open       {*}$params] }
-        "adddir"     { return [sdcdb_adddir     {*}$params] }
-        "reload"     { return [sdcdb_reload     {*}$params] }
-        "break"      { return [sdcdb_break      {*}$params] }
-        "list"       { return [sdcdb_list       {*}$params] }
-        "list."      { return [sdcdb_list.      {*}$params] }
-        "step"       { return [sdcdb_step       {*}$params] }
-        "quit"       { return [sdcdb_quit       {*}$params] }
+        "open"  { return [sdcdb_open       {*}$params] }
+        add     { return [sdcdb_add        {*}$params] }
+        reload  { return [sdcdb_reload     {*}$params] }
+        "break" { return [sdcdb_break      {*}$params] }
+        "list"  { return [sdcdb_list       {*}$params] }
+        "list." { return [sdcdb_list.      {*}$params] }
+        step    { return [sdcdb_step       {*}$params] }
+        quit    { return [sdcdb_quit       {*}$params] }
         default      { error "Unknown command \"[lindex $args 0]\"." }
     }
 }
@@ -195,35 +194,93 @@ proc sdcdb_open {path} {
     }
     variable cdb_path $path
     variable cdb_file $file
-    set cdb [file join $path $file]
-    debug "reading $cdb..."
-    read_cdb $cdb
+    warn "reading $file..."
+    read_cdb $file
 }
 
-proc read_cdb {cdb} {
+proc read_cdb {fname} {
     variable c_files_ref
-    set fh [open cdb "r"]]
-    # search for "L:C$filename$line$level$block$endAddress" lines
-    set pattern {L:C\$([^$]+)\$([^$]+)\$([^$]+)\$([^$]+)\$:(\W+)}
-    while {[gets $file line] != -1} {
-        set match [regexp $pattern $line]
-        if {[llength $match] > 1} {
-            lassign $match filename linenum {} {} endAddress
+    variable mem
+    set fh [open $fname "r"]
+    # file line pattern: search for "L:C$filename$line$level$block:address" lines
+    set f_line_pat {^L:C\$([^$]+)\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
+    # function begin pattern: search for "L:(G|F<name>|L<name>)$function$level$block:address" lines
+    set func_bn_pat {^L:(G|F([^$]+)|L([^$]+))\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
+    # function end pattern: search for "L:X(G|F<name>|L<name>)$function$level$block:address" lines
+    set func_ed_pat {^L:X(G|F([^$]+)|L([^$]+))\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
+    set count 0
+    while {[gets $fh line] != -1} {
+        set match [regexp -inline $f_line_pat $line]
+        if {[llength $match] == 6} {
+            lassign $match {} filename linenum {} {} address
             incr c_files_ref($filename)
-            if {$c_files_ref($filename) eq 1} { debug "Added C file '$filename'" }
-            variable c_$filename($linenum) $endAddress
-	    variable mem($endAddress) { file $filename line $linenum }
-            debug "$filename: added line $linenum: $endAddress"
+            if {$c_files_ref($filename) eq 1} { warn "Added C file '$filename'" }
+            # Put line -> address mapping of array with dynamic name
+            upvar {c_$filename} var
+            global var
+            set var($linenum) $address
+            set mem($address) { file $filename line $linenum }
+            warn "$filename: $linenum -> $address"
+            incr count
+            continue
         }
-        incr count
+        set match [regexp -inline $func_bn_pat $line]
+        if {[llength $match] == 8} {
+            lassign $match {} context {} {} name {} {} address
+            #warn "func_bn_pat found at '$line': $context, $name, $address"
+            # Put function begin record in array with dynamic name
+            switch -- [string index $context 0] {
+                G {
+                    variable global_a
+                    set global_a($name) [list begin $address]
+                    warn "global_a($name): $global_a($name)"
+                }
+                F {
+                    set filename [string range $context 1 [string length $context]]
+                    upvar {$filename_a} var
+                    global var
+                    set var($name) [list begin $address]
+                    warn "${filename}_a($name): $var($name)"
+                }
+                L {
+                }
+            }
+            continue
+        }
+        set match [regexp -inline $func_ed_pat $line]
+        if {[llength $match] == 8} {
+            lassign $match {} context {} {} name {} {} address
+            #warn "func_ed_pat found at '$line': $context, $name, $address"
+            # Put function end record in array with dynamic name
+            switch -- [string index $context 0] {
+                G {
+                    variable global_a
+                    set global_a($name) [concat $global_a($name) [list end $address]]
+                    warn "X: global_a($name): $global_a($name)"
+                }
+                F {
+                    set filename [string range $context 1 [string length $context]]
+                    upvar {$filename_a} var
+                    global var
+                    #set var($name) { begin $address }
+                    set var($name) [concat $var($name) [list end $address]]
+                    warn "X: ${filename}_a($name): $var($name)"
+                }
+                L {
+                }
+            }
+            continue
+        }
+        warn "Ignored '$line'"
     }
     close $fh
-    debug "[llength c_files_ref] C files added"
-    debug "$count lines found"
+    warn "[array size c_files_ref] C files references added"
+    warn "$count lines found"
 }
 
-proc sdcdb_addsrc {path} {
+proc sdcdb_add {path} {
     set new_files [glob -type f -directory $path *.c]
+    warn "adding files: [join $new_files {, }]"
     variable c_files
     lappend c_files {*}$new_files
 }
@@ -243,10 +300,10 @@ proc sdcdb_list. {} {
     # TODO: scan mem near PC to find C source file and lineno.
 }
 
-proc list_file {file start {end {}} {
+proc list_file {file start {end {}}} {
     variable c_files
     set index [lsearch $c_files $file]
-    if {$index eq -1}
+    if {$index eq -1} {
         error "file not found in source list, add a directory that contains such file with 'sdcdb addsrc <dir>'"
     }
     # TODO: list file source
