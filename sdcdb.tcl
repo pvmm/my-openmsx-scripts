@@ -198,6 +198,11 @@ proc sdcdb_open {path} {
     read_cdb $file
 }
 
+proc complete {label name list} {
+    upvar $label var
+    set var($name) [concat $var($name) $list]
+}
+
 proc read_cdb {fname} {
     variable c_files_ref
     variable mem
@@ -216,11 +221,12 @@ proc read_cdb {fname} {
             incr c_files_ref($filename)
             if {$c_files_ref($filename) eq 1} { warn "Added C file '$filename'" }
             # Put line -> address mapping of array with dynamic name
-            upvar {c_$filename} var
+            set rootname [file rootname $filename]
+            upvar ${rootname}_c var
             global var
             set var($linenum) $address
             set mem($address) { file $filename line $linenum }
-            warn "$filename: $linenum -> $address"
+            warn "${rootname}_c($linenum): $var($linenum)"
             incr count
             continue
         }
@@ -250,20 +256,18 @@ proc read_cdb {fname} {
         set match [regexp -inline $func_ed_pat $line]
         if {[llength $match] == 8} {
             lassign $match {} context {} {} name {} {} address
-            #warn "func_ed_pat found at '$line': $context, $name, $address"
             # Put function end record in array with dynamic name
             switch -- [string index $context 0] {
                 G {
                     variable global_a
-                    set global_a($name) [concat $global_a($name) [list end $address]]
+                    complete global_a $name [list end $address]
                     warn "X: global_a($name): $global_a($name)"
                 }
                 F {
                     set filename [string range $context 1 [string length $context]]
                     upvar {$filename_a} var
                     global var
-                    #set var($name) { begin $address }
-                    set var($name) [concat $var($name) [list end $address]]
+                    complete var $name [list end $address]
                     warn "X: ${filename}_a($name): $var($name)"
                 }
                 L {
