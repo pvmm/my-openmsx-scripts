@@ -28,9 +28,9 @@
 # list ?line?
 #       - list source code at <file>:<line>[-<line>]
 # step
-#       - Executes one line of C code.
-# next
 #       - Executes one line of C code, proceeding through subroutine calls.
+# next
+#       - Executes one line of C code, not following subroutine calls.
 #
 # For more information about the CDB file format: https://sourceforge.net/p/sdcc/wiki/Home/
 
@@ -55,6 +55,7 @@ variable asm_files_ref  ;# ASM files reference
 variable cdb_path
 variable cdb_file
 array set mem {}        ;# find source from address
+array set global_a {}   ;# find address from source
 
 set_help_proc sdcdb [namespace code sdcdb_help]
 proc sdcdb_help {args} {
@@ -83,16 +84,25 @@ Syntax: cdb reload on|off|now
 Create a OpenMSX breakpoint, but using the a C source file as reference.
 
 Syntax: sdcdb break file:line
-
-file:line where the breakpoint will be created.
+        sdcdb break file:functionName
+        sdcdb break functionName
 }}
         "list" { return {Lists contents of a C source file.
+Without parameters, 'list' returns the C source code under the PC register.
 
 Syntax: sdcdb list file:line
+        sdcdb list file:functionName
+        sdcdb list functionName
 }}
-        "list." { return {Lists contents of C source under the PC register.
+        "next" { return {Execute next line of C code.
+'next' will not proceed through subroutine calls.
 
-Syntax: sdcdb list.
+Syntax: sdcdb next
+}}
+        "step" { return {Step through every line of C.
+'step' will proceed through subroutine calls.
+
+Syntax: sdcdb step
 }}
         "quit" { return {Closes CDB file and free all memory.
 
@@ -128,14 +138,14 @@ proc env {varname {defaults {}}} {
 
 proc sdcdb {args} {
     if {[env DEBUG]} {
-        if {[catch {dispatcher {*}$args} fid]} {
+        if {[catch {set result [dispatcher {*}$args]} fid]} {
             puts stderr $::errorInfo
             error $::errorInfo
         }
     } else {
-        dispatcher {*}$args
+        set result [dispatcher {*}$args]
     }
-    return
+    return $result
 }
 
 proc dispatcher {args} {
@@ -146,7 +156,7 @@ proc dispatcher {args} {
         reload  { return [sdcdb_reload     {*}$params] }
         "break" { return [sdcdb_break      {*}$params] }
         "list"  { return [sdcdb_list       {*}$params] }
-        "list." { return [sdcdb_list.      {*}$params] }
+        "next"  { return [sdcdb_next       {*}$params] }
         step    { return [sdcdb_step       {*}$params] }
         quit    { return [sdcdb_quit       {*}$params] }
         default      { error "Unknown command \"[lindex $args 0]\"." }
@@ -201,7 +211,7 @@ proc sdcdb_open {path} {
 proc complete {label name list} {
     upvar $label var
     if {![info exists var($name)]} { warn "$label\($name\) ignored"; return 0 }
-    set var($name) [concat $var($name) $list]
+    set var($name) [concat {*}$var($name) {*}$list]
     return 1
 }
 
@@ -224,19 +234,19 @@ proc read_cdb {fname} {
     while {[gets $fh line] != -1} {
         set match [regexp -inline $func_pat $line]
         if {[llength $match] == 5} {
-            lassign $match {} context {} {} name
+            lassign $match {} context {} {} funcname
             switch -- [string index $context 0] {
                 G {
                     variable global_a
-                    set global_a($name) {}
-                    warn "global_a($name): $global_a($name)"
+                    set global_a($funcname) {}
+                    warn "global_a\($funcname\) created"
                 }
                 F {
                     set filename [string range $context 1 [string length $context]]
                     upvar {$filename_a} var
-                    global var
-                    set var($name) {}
-                    warn "${filename}_a($name): $var($name)"
+                    variable var
+                    set var($funcname) {}
+                    warn "${filename}_a\($funcname\) created"
                 }
                 L {
                     error "not implemented yet '$line' \[1\]"
@@ -252,7 +262,7 @@ proc read_cdb {fname} {
             # Put line -> address mapping of array with dynamic name
             set rootname [file rootname $filename]
             upvar ${rootname}_c var
-            global var
+            variable var
             set var($linenum) $address
             set mem($address) { file $filename line $linenum }
             warn "${rootname}_c($linenum): $var($linenum)"
@@ -261,23 +271,23 @@ proc read_cdb {fname} {
         }
         set match [regexp -inline $func_bn_pat $line]
         if {[llength $match] == 8} {
-            lassign $match {} context {} {} name {} {} address
-            #warn "func_bn_pat found at '$line': $context, $name, $address"
+            lassign $match {} context {} {} funcname {} {} address
+            #warn "func_bn_pat found at '$line': $context, $funcname, $address"
             # Put function begin record in array with dynamic name
             switch -- [string index $context 0] {
                 G {
                     variable global_a
-                    if {[complete global_a $name [list begin $address]]} {
-                        warn "global_a($name): $global_a($name)"
+                    if {[complete global_a $funcname [list begin $address]]} {
+                        warn "global_a\($funcname\): $global_a($funcname)"
                         incr gf_count
                     }
                 }
                 F {
                     set filename [string range $context 1 [string length $context]]
                     upvar {$filename_a} var
-                    global var
-                    if {[complete var $name [list begin $address]]} {
-                        warn "${filename}_a($name): $var($name)"
+                    variable var
+                    if {[complete var $funcname [list begin $address]]} {
+                        warn "${filename}_a\($funcname\): $var($funcname)"
                         incr sf_count
                     }
                 }
@@ -289,21 +299,21 @@ proc read_cdb {fname} {
         }
         set match [regexp -inline $func_ed_pat $line]
         if {[llength $match] == 8} {
-            lassign $match {} context {} {} name {} {} address
+            lassign $match {} context {} {} funcname {} {} address
             # Put function end record in array with dynamic name
             switch -- [string index $context 0] {
                 G {
                     variable global_a
-                    if {[complete global_a $name [list end $address]]} {
-                        warn "X: global_a($name): $global_a($name)"
+                    if {[complete global_a $funcname [list end $address]]} {
+                        warn "X: global_a\($funcname\): $global_a($funcname)"
                     }
                 }
                 F {
                     set filename [string range $context 1 [string length $context]]
                     upvar {$filename_a} var
                     global var
-                    if {[complete var $name [list end $address]]} {
-                        warn "X: ${filename}_a($name): $var($name)"
+                    if {[complete var $funcname [list end $address]]} {
+                        warn "X: ${filename}_a\($funcname\): $var($funcname)"
                     }
                 }
                 L {
@@ -317,8 +327,8 @@ proc read_cdb {fname} {
     close $fh
     output "[array size c_files_ref] C files references added"
     output "$c_count C source lines found"
-    output "$gf_count global functions registered"
-    output "$sf_count static functions registered"
+    output "$gf_count global function(s) registered"
+    output "$sf_count static function(s) registered"
 }
 
 proc sdcdb_add {path} {
@@ -514,13 +524,60 @@ proc sdcdb_disconnect {} {
     set pipe 0
 }
 
-proc sdcdb_break {arg} {
-    set pattern {([^:]+):(\d+)}
-    set matches [regexp -inline $pattern $arg]
-
-    if {[llength $matches] > 0} {
-        variable context break0
-        send_command [list break $arg]
+proc sdcdb_break {pos {cond {}} {cmd {debug break}}} {
+    set pattern1 {([^:]+):(\d+)}
+    set pattern2 {([^:]+):(\S+)}
+    set pattern3 {(\S+)}
+    set match [regexp -inline $pattern1 $pos]
+    if {[llength $match] == 3} {
+        lassign $match {} filename linenum
+        set arrayname [file rootname $filename]
+        upvar ${arrayname}_c var
+        variable var
+	if {![info exists var]} {
+            error "source file not found"
+	}
+        set address [array get var $linenum]
+        if {$address ne {}} {
+            return [debug breakpoint create -address [lindex $address 1] -condition $cond -command $cmd]
+        } else {
+            error "address not found"
+        }
+        return {}
+    }
+    set match [regexp -inline $pattern2 $pos]
+    if {[llength $match] == 3} {
+        lassign $match {} filename funcname
+        set arrayname [file rootname $filename]
+        upvar ${arrayname}_c var
+        variable var
+	if {![info exists var]} {
+            error "source file not found"
+	}
+        set record [array get var $funcname]
+        if {$record eq {}} {
+            # not found, search globally
+            variable global_a
+            set record [array get global_a $funcname]
+        }
+        if {$record ne {}} {
+            set record [eval list [lindex $record 1]]
+            return [debug breakpoint create -address [lindex $record 1] -condition $cond -command $cmd]
+        } else {
+            error "function not found"
+        }
+    }
+    set match [regexp -inline $pattern3 $pos]
+    if {[llength $match] == 2} {
+        lassign $match {} funcname
+        variable global_a
+        set record [array get global_a $funcname]
+        if {$record ne {}} {
+            set record [eval list [lindex $record 1]]
+            return [debug breakpoint create -address [lindex $record 1] -condition $cond -command $cmd]
+        } else {
+            error "function not found"
+        }
     } else {
         error "error parsing break command"
     }
