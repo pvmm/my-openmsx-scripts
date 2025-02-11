@@ -159,12 +159,13 @@ proc sdcdb_open {path} {
     sdcdb_add $path
     warn "reading $file..."
     read_cdb $file
+    process_data
 }
 
 proc complete {arrayname name list} {
     variable $arrayname
     if {![info exists ${arrayname}($name)]} { warn "$arrayname\($name\) ignored"; return 0 }
-    set ${arrayname}($name) [concat {*}${arrayname}($name) {*}$list]
+    set ${arrayname}($name) [concat {*}[set ${arrayname}($name)] {*}$list]
     return 1
 }
 
@@ -273,7 +274,6 @@ proc read_cdb {fname} {
         ;#warn "Ignored '$line'"
     }
     close $fh
-    fix_databases
     output "[array size c_files_count] C files references added"
     output "$c_count C source lines found"
     output "$gf_count global function(s) registered"
@@ -292,7 +292,7 @@ proc fix_blank_spaces {arrayname} {
     set count 0
     set old_key {}
     foreach key [lsort -integer [array names $arrayname]] {
-        if {$old_key ne {} && $old_key != [expr $key - 1]} {
+        if {$old_key ne {} && [expr $key - 1] != $old_key} {
             for {set i [expr $old_key + 1]} {$i < $key} {incr i} {
                 #warn "Setting $arrayname\($i\) to ${arrayname}\($old_key\) = [set ${arrayname}($old_key)]"
                 set ${arrayname}($i) [set ${arrayname}($old_key)]
@@ -304,14 +304,37 @@ proc fix_blank_spaces {arrayname} {
     return $count
 }
 
-proc fix_databases {} {
+proc fix_last_address {arrayname} {
+    variable $arrayname 
+    set old_key {}
+    set sorted [lsort -integer [array names $arrayname]]
+    foreach key $sorted {
+        if {$old_key ne {} && [set ${arrayname}($old_key)] ne [set ${arrayname}($key)]} {
+            set ${arrayname}($old_key) [list begin [set ${arrayname}($old_key)] end [expr [set ${arrayname}($key)] - 1]]
+            incr count
+        } elseif {$old_key ne {}} {
+            set ${arrayname}($old_key) [list begin [set ${arrayname}($old_key)] end [set ${arrayname}($old_key)]]
+        }
+        set old_key $key
+    }
+    if {[llength $sorted] > 0} {
+        # change last value
+        set last [lindex $sorted end]
+        set ${arrayname}($last) [list begin [set ${arrayname}($last)] end [set ${arrayname}($last)]]
+        incr count
+    }
+}
+
+proc process_data {} {
     variable c_files
+    set count 0
     foreach filename [array names c_files] {
         set arrayname [file rootname $filename]2addr
         variable $arrayname
-        set count [fix_blank_spaces $arrayname]
+        fix_last_address $arrayname
+        fix_blank_spaces $arrayname
     }
-    set count [fix_blank_spaces addr2file]
+    fix_blank_spaces addr2file
 }
 
 proc recursive_glob {dir pattern} {
@@ -377,7 +400,7 @@ proc list_file {file start {end {}}} {
     while {[gets $fh line] >= 0} {
         incr count
         if {$count >= $start} {
-            output "[format %5d $count]:    $line"
+            output "[format %-5d $count]:    $line"
         }
         if {$count >= $end} {
             break
