@@ -121,10 +121,10 @@ proc output {args} {
     flush $chan
 }
 
-proc warn {msg} {
+proc warn {args} {
     if {[env DEBUG]} {
         set chan stderr
-        set msg [string map {"\n" "\\n"} $msg]
+        set msg [string map {"\n" "\\n"} [join $args " "]]
         puts $chan $msg
         flush $chan
     }
@@ -328,10 +328,11 @@ proc sdcdb_add {path} {
     }
 }
 
-proc sdcdb_list {arg} {
+proc sdcdb_list {args} {
     set pattern1 {([^:]+):(\d+)(-(\d+))?}
     set pattern2 {([^:]+):(\S+)}
     set pattern3 {(\S+)}
+    set arg [lindex $args 0]
     set match [regexp -inline $pattern1 $arg]
     if {[llength $match] == 5} {
         lassign $match {} filename start {} end
@@ -340,14 +341,14 @@ proc sdcdb_list {arg} {
     set match [regexp -inline $pattern2 $arg]
     if {[llength $match] == 3} {
         lassign $match {} filename funcname
-	return [list_fun $filename $funcname]
+        return [list_fun $filename $funcname]
     }
     set match [regexp -inline $pattern3 $arg]
     if {[llength $match] == 2} {
         lassign $match {} funcname
-	return [list_fun {} $funcname]
+        return [list_fun {} $funcname]
     }
-    # TODO: scan addr2file near PC to find C source file and lineno.
+    return [list_pc]
 }
 
 proc list_file {file start {end {}}} {
@@ -372,31 +373,47 @@ proc list_file {file start {end {}}} {
     close $fh
 }
 
-proc list_fun {file funcname} {
-    lassign [scanfun $file $funcname] start end
-    output $start $end
+proc list_pc {} {
+    variable addr2file
+    if {[array get addr2file [reg PC]] ne {}} {
+        debug break  ;# makes no sense to list a running program
+        lassign $addr2file([reg PC]) {} file {} start
+        return [list_file $file [expr $start - 1] [expr $start + 9]]
+    }
+    output "address database not found for 0x[format %04X [reg PC]]"
+}
+
+proc list_fun {filename funcname} {
+    lassign [scanfun $filename $funcname] start end
     variable addr2file
     if {[array get addr2file $start] ne {}} {
         lassign $addr2file($start) {} file {} start 
         lassign $addr2file($end)   {}  {}  {} end
-	return [list_file $file [expr $start - 1] $end]
+        if {$file ne $filename} {
+            error "function database '$funcname' not found in '$filename'"
+        }
+        return [list_file $file [expr $start - 1] $end]
     }
     error "function database '$funcname' not found"
 }
 
 # scan file database then global database for function name
 proc scanfun {filename funcname} {
-    set arrayname [file rootname $filename]2addr
-    upvar $arrayname var
-    variable var
-    if {![info exists var]} {
-        error "file database '$arrayname' not found"
+    if {$filename ne {}} {
+        set arrayname [file rootname $filename]2addr
+        upvar $arrayname var
+        variable var
+        if {![info exists var]} {
+            error "file database '$arrayname' not found"
+        }
+        set record [lindex [array get var $funcname] 1]
+    } else {
+        set record {}
     }
-    set record [lindex [array get var $funcname] 1]
     if {$record eq {}} {
         # not found in file, search globally
         variable g_file2addr
-	set record [lindex [array get g_file2addr $funcname] 1]
+        set record [lindex [array get g_file2addr $funcname] 1]
     }
     set result [list [lindex $record 1] [lindex $record 3]]
     return [eval list $result]
@@ -443,7 +460,6 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern1 $pos]
     if {[llength $match] == 3} {
         lassign $match {} filename linenum
-        output $match: $filename $linenum
         set address [scanline $filename $linenum]
         if {$address ne {}} {
             return [debug breakpoint create -address $address -condition $cond -command $cmd]
@@ -454,8 +470,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern2 $pos]
     if {[llength $match] == 3} {
         lassign $match {} filename funcname
-        output $match: $filename $funcname
-        lassign [scanfun $file $funcname] start {}
+        lassign [scanfun $filename $funcname] start {}
         if {$start ne {}} {
             return [debug breakpoint create -address $start -condition $cond -command $cmd]
         } else {
@@ -465,8 +480,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern3 $pos]
     if {[llength $match] == 2} {
         lassign $match {} funcname
-        output $match: $funcname
-        lassign [scanfun $file $funcname] start {}
+        lassign [scanfun {} $funcname] start {}
         if {$start eq {}} {
             error "function not found"
         }
@@ -478,29 +492,31 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
 
 proc sdcdb_next {{times 1}} {
     debug break  ;# just to be sure
-    for {set i $times} {$i > 0} {decr i} {
-        do_debug_step over
+    for {set i $times} {$i > 0} {incr i -1} {
+        debug_step over
     }
 }
 
 proc sdcdb_step {{times 1} {next {}}} {
     debug break  ;# just to be sure
-    for {set i $times} {$i > 0} {decr i} {
-        do_debug_step in
+    for {set i $times} {$i > 0} {incr i -1} {
+        debug_step in
     }
 }
 
-proc do_debug_step {{type {}}} {
+proc debug_step {{type {}}} {
     variable addr2file
     if {[array get addr2file [reg PC]] ne {}} {
-        lassign $addr2file($address) {} file {} line
+        lassign $addr2file([reg PC]) {} file {} line
         set once 0
         set count 0
-        while {new_file eq file && new_line eq line} {
-            if {$type eq over} { step over } else { step in }
+        set new_file $file
+        set new_line $line
+        while {$new_file eq $file && $new_line eq $line} {
+            if {$type eq "over"} { step over } else { step in }
             lassign $addr2file([rec PC]) {} new_file {} new_line
             incr count
-            if {new_line eq {} && !$once} {
+            if {$new_line eq {} && !$once} {
                 output "no debug information at this level, skipping until there is."
                 incr once
             }
@@ -523,7 +539,7 @@ proc print_info {} {
             output c_files: [array get c_files]
             error "Cannot localize source code file: '$file' missing.\nUse 'sdcdb add <path>' to add more source files to the source database."
         }
-        list_file $file [expr $line - 1] [expr $line + 3]
+        list_file $file [expr $line - 1] [expr $line + 1]
     } else {
         error "line mapping not found for 0x[format %04X [reg PC]]"
     }
