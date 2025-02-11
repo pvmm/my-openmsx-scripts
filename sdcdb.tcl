@@ -46,6 +46,7 @@ array set c_files     {}        ;# pool of c source files
 array set addr2file   {}        ;# array that maps source from address
 array set g_file2addr {}        ;# array that maps address from source (global)
 # array set <filename>2addr     ;# same, but dinamically created array for each SDCC module (C file)
+# array set <function>2line     ;# array that maps function to source (global)
 
 set_help_proc sdcdb [namespace code sdcdb_help]
 proc sdcdb_help {args} {
@@ -227,7 +228,7 @@ proc read_cdb {fname} {
                 }
                 F {
                     set arrayname [string range $context 1 [string length $context]]2addr
-                    upvar ${arrayname} var
+                    upvar $arrayname var
                     variable var
                     set var($funcname) {}
                     warn "${arrayname}\($funcname\) created"
@@ -245,7 +246,7 @@ proc read_cdb {fname} {
             # Put line -> address mapping of array with dynamic name
             set arrayname [file rootname $filename]2addr
             if {$c_files_count($filename) eq 1} { warn "Added C file '$arrayname'" }
-            upvar ${arrayname} var
+            upvar $arrayname var
             variable var
             set var($linenum) [expr 0x$address]
             set addr2file([expr 0x$address]) [list file $filename line $linenum]
@@ -256,19 +257,18 @@ proc read_cdb {fname} {
         set match [regexp -inline $func_bn_pat $line]
         if {[llength $match] == 8} {
             lassign $match {} context {} {} funcname {} {} address
-            #warn "func_bn_pat found at '$line': $context, $funcname, $address"
             # Put function begin record in array with dynamic name
             switch -- [string index $context 0] {
                 G {
                     variable g_file2addr
-                    if {[complete g_file2addr $funcname [list begin $address]]} {
+                    if {[complete g_file2addr $funcname [list begin [expr 0x$address]]]} {
                         warn "g_file2addr\($funcname\): $g_file2addr($funcname)"
                         incr gf_count
                     }
                 }
                 F {
                     set arrayname [string range $context 1 [string length $context]]2addr
-                    upvar ${arrayname} var
+                    upvar $arrayname var
                     variable var
                     if {[complete var $funcname [list begin $address]]} {
                         warn "${filename}2addr\($funcname\): $var($funcname)"
@@ -288,13 +288,13 @@ proc read_cdb {fname} {
             switch -- [string index $context 0] {
                 G {
                     variable g_file2addr
-                    if {[complete g_file2addr $funcname [list end $address]]} {
+                    if {[complete g_file2addr $funcname [list end [expr 0x$address]]]} {
                         warn "X: g_file2addr\($funcname\): $g_file2addr($funcname)"
                     }
                 }
                 F {
                     set arrayname [string range $context 1 [string length $context]]2addr
-                    upvar ${arrayname} var
+                    upvar $arrayname var
                     global var
                     if {[complete var $funcname [list end $address]]} {
                         warn "X: ${arrayname}\($funcname\): $var($funcname)"
@@ -329,23 +329,23 @@ proc sdcdb_add {path} {
 }
 
 proc sdcdb_list {arg} {
-    set pattern1 {([^:]+):(\d+)?(-(\d+))}
+    set pattern1 {([^:]+):(\d+)(-(\d+))?}
     set pattern2 {([^:]+):(\S+)}
     set pattern3 {(\S+)}
     set match [regexp -inline $pattern1 $arg]
-    if {[llength $match] == 4} {
-        lassign $match {} filename start end
-        return list_file $filename $start $end
+    if {[llength $match] == 5} {
+        lassign $match {} filename start {} end
+        return [list_file $filename $start $end]
     }
     set match [regexp -inline $pattern2 $arg]
     if {[llength $match] == 3} {
         lassign $match {} filename funcname
-        # TODO: list_function
+	return [list_fun $filename $funcname]
     }
     set match [regexp -inline $pattern3 $arg]
     if {[llength $match] == 2} {
         lassign $match {} funcname
-        # TODO: list_function
+	return [list_fun {} $funcname]
     }
     # TODO: scan addr2file near PC to find C source file and lineno.
 }
@@ -372,32 +372,45 @@ proc list_file {file start {end {}}} {
     close $fh
 }
 
+proc list_fun {file funcname} {
+    lassign [scanfun $file $funcname] start end
+    output $start $end
+    variable addr2file
+    if {[array get addr2file $start] ne {}} {
+        lassign $addr2file($start) {} file {} start 
+        lassign $addr2file($end)   {}  {}  {} end
+	return [list_file $file [expr $start - 1] $end]
+    }
+    error "function database '$funcname' not found"
+}
+
 # scan file database then global database for function name
-proc scanfunc {filename funcname} {
+proc scanfun {filename funcname} {
     set arrayname [file rootname $filename]2addr
-    upvar ${arrayname} var
+    upvar $arrayname var
     variable var
     if {![info exists var]} {
-        error "source file not found"
+        error "file database '$arrayname' not found"
     }
     set record [lindex [array get var $funcname] 1]
     if {$record eq {}} {
         # not found in file, search globally
         variable g_file2addr
-        set record [lindex [array get g_file2addr $funcname] 1]
+	set record [lindex [array get g_file2addr $funcname] 1]
     }
-    return [lindex [eval list $record] 1]
+    set result [list [lindex $record 1] [lindex $record 3]]
+    return [eval list $result]
 }
 
 # reverse function search (global first, then search all files)
-proc scanfunc_r {funcname} {
+proc scanfun_r {funcname} {
     variable g_file2addr
     set record [lindex [array get g_file2addr $funcname] 1]
     if {$record eq {}} {
         variable c_files
         foreach filename c_files {
             set arrayname [file rootname $filename]2addr
-            upvar ${arrayname} var
+            upvar $arrayname var
             variable var
             if {[info exists var($funcname)]} {
                 set record [lindex [array get var $line] 1]
@@ -405,12 +418,13 @@ proc scanfunc_r {funcname} {
             }
         }
     }
-    return [lindex [eval list $record] 1]
+    set result [list [lindex $record 1] [lindex $record 3]]
+    return [eval list $result]
 }
 
 proc scanline {file line} {
     set arrayname [file rootname $file]2addr
-    upvar ${arrayname} var
+    upvar $arrayname var
     variable var
     if {![info exists var]} {
         error "source file not found"
@@ -441,9 +455,9 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     if {[llength $match] == 3} {
         lassign $match {} filename funcname
         output $match: $filename $funcname
-        set address [scanfunc $filename $funcname]
-        if {$address ne {}} {
-            return [debug breakpoint create -address 0x$address -condition $cond -command $cmd]
+        lassign [scanfun $file $funcname] start {}
+        if {$start ne {}} {
+            return [debug breakpoint create -address $start -condition $cond -command $cmd]
         } else {
             error "function not found"
         }
@@ -452,11 +466,11 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     if {[llength $match] == 2} {
         lassign $match {} funcname
         output $match: $funcname
-        set address [scanfunc_r $funcname]
-        if {$address eq {}} {
+        lassign [scanfun $file $funcname] start {}
+        if {$start eq {}} {
             error "function not found"
         }
-        return [debug breakpoint create -address 0x$address -condition $cond -command $cmd]
+        return [debug breakpoint create -address $start -condition $cond -command $cmd]
     } else {
         error "error parsing break command"
     }
@@ -478,9 +492,9 @@ proc sdcdb_step {{times 1} {next {}}} {
 
 proc do_debug_step {{type {}}} {
     variable addr2file
-    set once 0
-    if {[array get addr2file [reg PC] ne {}} {
+    if {[array get addr2file [reg PC]] ne {}} {
         lassign $addr2file($address) {} file {} line
+        set once 0
         set count 0
         while {new_file eq file && new_line eq line} {
             if {$type eq over} { step over } else { step in }
@@ -509,7 +523,7 @@ proc print_info {} {
             output c_files: [array get c_files]
             error "Cannot localize source code file: '$file' missing.\nUse 'sdcdb add <path>' to add more source files to the source database."
         }
-        list_file $file $line
+        list_file $file [expr $line - 1] [expr $line + 3]
     } else {
         error "line mapping not found for 0x[format %04X [reg PC]]"
     }
@@ -529,7 +543,7 @@ proc sdcdb_quit {} {
     if {[info exists c_files]} {
         foreach filename c_files {
             set arrayname [file rootname $filename]2addr
-            upvar ${arrayname} var
+            upvar $arrayname var
             variable var
             unset var
         }
