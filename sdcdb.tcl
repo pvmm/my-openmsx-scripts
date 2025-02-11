@@ -18,18 +18,10 @@
 #       - Read CDB file specified by a path parameter
 # add path_to_source_dir
 #       - Scan directory for C source files
-# reload on|off|now
-#       - Turns on or off checking if CDB file has changed on disk every 10 seconds
-#         or force a synchronous reload.
 # break line
 #       - creates breakpoint in <file>:<line>
 # list ?line?
 #       - list source code at <file>:<line>[-<line>]
-# step ?n?
-#       - Executes next n lines of C code step by step, proceeding through subroutine calls.
-#         n defaults to 1.
-# next ?n?
-#       - Executes next n lines of C code, not following subroutine calls. n defaults to 1.
 # info ?-break?
 #       - Display information on source code under the program counter. The -break
 #         parameter stops execution.
@@ -53,7 +45,7 @@ proc sdcdb_help {args} {
     if {[llength $args] == 1} {
         return {The SDCDB debugger in Tcl connects OpenMSX to the CDB file created by SDCC.
 
-Recognized commands: open, add, reload, break, list, next, step, info, quit
+Recognized commands: open, add, break, list, info, quit
 
 Type 'help sdcdb <command>' for more information about each command.
 }
@@ -69,12 +61,6 @@ Syntax: sdcdb open <pathToCDBFile>
 
 Syntax: sdcdb add <dir>
 }}
-        "reload" { return {Turns on/off file checking
-
-Turn on/off checking if CDB file has changed and reload it if true. A 'now' parameter can be specified and it forces instanteneous reloading.
-
-Syntax: cdb reload on|off|now
-}}
         "break" { return {Creates a breakpoint
 
 Create a OpenMSX breakpoint, but using the C source files as reference. 'sdcdb info -break' replaces 'debug break' for extra details about C code execution.
@@ -87,21 +73,10 @@ Syntax: sdcdb break <file>:<line>
 
 Without parameters, 'sdcdb list' returns the C source code under the PC register.
 
-Syntax: sdcdb list <file>:<line>
+Syntax: sdcdb list
+        sdcdb list <file>:<line>
         sdcdb list <file>:<functionName>
         sdcdb list <functionName>
-}}
-        "next" { return {Executes next n lines of C code
-
-The 'sdcdb next' command will not proceed through subroutine calls. You may specify how many times 'sdcdb next' should execute (defaults to 1).
-
-Syntax: sdcdb next ?n?
-}}
-        "step" { return {Steps through next n lines of C code
-
-The 'sdcdb step' command will proceed through subroutine calls. You may specify how many times 'sdcdb step' should execute (defaults to 1).
-
-Syntax: sdcdb step ?n?
 }}
         "info" { return {Displays information about current line of source code
 
@@ -163,11 +138,8 @@ proc dispatcher {args} {
         error "SDCDB not initialized"
     }
     switch -- $cmd {
-        reload  { return [sdcdb_reload     {*}$params] }
         "break" { return [sdcdb_break      {*}$params] }
         "list"  { return [sdcdb_list       {*}$params] }
-        "next"  { return [sdcdb_next       {*}$params] }
-        step    { return [sdcdb_step       {*}$params] }
         "info"  { return [sdcdb_info       {*}$params] }
         default { error "Unknown command \"[lindex $args 0]\"." }
     }
@@ -450,6 +422,7 @@ proc scanline {file line} {
     if {$record eq {}} {
         error "line $line not found in file '$file'"
     }
+    output record: $record
     return [lindex $record 1]
 }
 
@@ -462,7 +435,8 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
         lassign $match {} filename linenum
         set address [scanline $filename $linenum]
         if {$address ne {}} {
-            return [debug breakpoint create -address $address -condition $cond -command $cmd]
+            debug breakpoint create -address $address -condition $cond -command $cmd
+	    return
         } else {
             error "address not found"
         }
@@ -472,7 +446,8 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
         lassign $match {} filename funcname
         lassign [scanfun $filename $funcname] start {}
         if {$start ne {}} {
-            return [debug breakpoint create -address $start -condition $cond -command $cmd]
+            debug breakpoint create -address $start -condition $cond -command $cmd
+	    return
         } else {
             error "function not found"
         }
@@ -484,7 +459,8 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
         if {$start eq {}} {
             error "function not found"
         }
-        return [debug breakpoint create -address $start -condition $cond -command $cmd]
+        debug breakpoint create -address $start -condition $cond -command $cmd
+	return
     } else {
         error "error parsing break command"
     }
@@ -492,39 +468,12 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
 
 proc sdcdb_next {{times 1}} {
     debug break  ;# just to be sure
-    for {set i $times} {$i > 0} {incr i -1} {
-        debug_step over
-    }
+    error "not implemented yet"
 }
 
 proc sdcdb_step {{times 1} {next {}}} {
     debug break  ;# just to be sure
-    for {set i $times} {$i > 0} {incr i -1} {
-        debug_step in
-    }
-}
-
-proc debug_step {{type {}}} {
-    variable addr2file
-    if {[array get addr2file [reg PC]] ne {}} {
-        lassign $addr2file([reg PC]) {} file {} line
-        set once 0
-        set count 0
-        set new_file $file
-        set new_line $line
-        while {$new_file eq $file && $new_line eq $line} {
-            if {$type eq "over"} { step over } else { step in }
-            lassign $addr2file([rec PC]) {} new_file {} new_line
-            incr count
-            if {$new_line eq {} && !$once} {
-                output "no debug information at this level, skipping until there is."
-                incr once
-            }
-        }
-        output "$count ML instructions passed"
-    } else {
-        output "no debug information at this level, stopping."
-    }
+    error "not implemented yet"
 }
 
 proc print_info {} {
