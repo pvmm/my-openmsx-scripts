@@ -11,7 +11,7 @@
 # [*] list C source code at line 100:
 #     > sdcdb list main.c:100
 # [*] and more things to come (WIP).
-# 
+#
 # All commands that the SDCDB Debugger recognizes directly. You may call them with sdcdb [COMMAND] [ARGS...]:
 #
 # open path_to_CDB_file
@@ -33,11 +33,11 @@
 namespace eval sdcdb {
 
 set ::env(DEBUG) 1
-variable old_address 0
+variable initialized    0
 variable c_files_count                  ;# C files reference
-array set c_files     {}                ;# pool of c source files
-array set addr2file   {}                ;# array that maps to source from address
-array set g_func2addr {}                ;# array that maps to address from source (global)
+array set c_files       {}              ;# pool of c source files
+array set addr2file     {}              ;# array that maps to source from address
+array set g_func2addr   {}              ;# array that maps to address from source (global)
 # array set <filename>2addr             ;# same, but dinamically created array for each SDCC module (C file)
 # array set <filename>_func2addr        ;# array that maps function to source (global)
 
@@ -134,8 +134,8 @@ proc dispatcher {args} {
         quit    { return [sdcdb_quit       {*}$params] }
     }
     # remaining commands need initialization
-    variable c_files_count
-    if {![info exists c_files_count]} {
+    variable initialized
+    if {!$initialized} {
         error "SDCDB not initialized"
     }
     switch -- $cmd {
@@ -146,29 +146,19 @@ proc dispatcher {args} {
     }
 }
 
-proc file_in_path {program} {
-    foreach dir [split $::env(PATH) ":"] {
-        set path [file join $dir $program]
-        # check if it is a file and has executable permission
-        if {[file isfile $path] && [file executable $path]} {
-            return $path
-        }
-    }
-    return {}
-}
-
 proc sdcdb_open {path} {
+    variable initialized
+    if {$initialized} {
+        error "SDCDB already initialized"
+    }
+    set initialized 1
     set file [glob -type f -directory $path *.cdb]
     if {[llength $file] ne 1} {
         error "unique regular CDB file not found"
     }
+    sdcdb_add $path
     warn "reading $file..."
     read_cdb $file
-}
-
-proc create_var {arrayname} {
-    variable $arrayname
-    array set $arrayname {}
 }
 
 proc complete {arrayname name list} {
@@ -283,11 +273,11 @@ proc read_cdb {fname} {
         ;#warn "Ignored '$line'"
     }
     close $fh
+    fix_databases
     output "[array size c_files_count] C files references added"
     output "$c_count C source lines found"
     output "$gf_count global function(s) registered"
     output "$sf_count static function(s) registered"
-    fix_databases
 }
 
 proc print_var {arrayname} {
@@ -320,14 +310,26 @@ proc fix_databases {} {
         set arrayname [file rootname $filename]2addr
         variable $arrayname
         set count [fix_blank_spaces $arrayname]
-        output "filled $count empty occurrences in $arrayname"
     }
     set count [fix_blank_spaces addr2file]
-    output "filled $count empty occurrences in addr2file"
+}
+
+proc recursive_glob {dir pattern} {
+    set result {}
+    foreach file [glob -nocomplain -directory $dir $pattern] {
+        lappend result $file
+    }
+    foreach subdir [glob -nocomplain -directory $dir *] {
+        if {[file isdirectory $subdir]} {
+            set sub_results [recursive_glob $subdir $pattern]
+            set result [concat $result $sub_results]
+        }
+    }
+    return $result
 }
 
 proc sdcdb_add {path} {
-    set new_files [glob -type f -directory $path *.c]
+    set new_files [recursive_glob $path *.c]
     warn "adding files: [join $new_files {, }]"
     variable c_files
     foreach path $new_files {
@@ -458,7 +460,6 @@ proc scanline {file line} {
     if {$record eq {}} {
         error "line $line not found in file '$file'"
     }
-    output record: $record
     return [lindex $record 1]
 }
 
@@ -540,8 +541,9 @@ proc sdcdb_info {arg} {
 }
 
 proc sdcdb_quit {} {
-    variable c_files
-    if {[info exists c_files]} {
+    variable initialized
+    if {$initialized} {
+        variable c_files
         foreach filename c_files {
             set arrayname [file rootname $filename]2addr
             variable $arrayname
@@ -561,24 +563,9 @@ proc sdcdb_quit {} {
     }
 }
 
-proc is_array {name} {
-    return [array exists $name]
-}
-
 namespace export sdcdb
 
 }
 
 # Import sdcdb exported functions
 namespace import sdcdb::*
-
-proc list_vars {} {
-    foreach var [info vars sdcdb::*] {
-        if {[sdcdb::is_array $var]} {
-            puts "is_array  $var, size: [array size $var]"
-        } elseif {[info exists $var]} {
-            puts "is_scalar $var = [set $var]"
-        }
-    }
-}
-
