@@ -270,7 +270,7 @@ proc read_cdb {fname} {
                     set arrayname [string range $context 1 [string length $context]]2addr
                     upvar $arrayname var
                     variable var
-                    if {[complete var $funcname [list begin $address]]} {
+                    if {[complete var $funcname [list begin [expr 0x$address]]]} {
                         warn "${filename}2addr\($funcname\): $var($funcname)"
                         incr sf_count
                     }
@@ -296,7 +296,7 @@ proc read_cdb {fname} {
                     set arrayname [string range $context 1 [string length $context]]2addr
                     upvar $arrayname var
                     global var
-                    if {[complete var $funcname [list end $address]]} {
+                    if {[complete var $funcname [list end [expr 0x$address]]]} {
                         warn "X: ${arrayname}\($funcname\): $var($funcname)"
                     }
                 }
@@ -446,7 +446,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
         output $match: $filename $linenum
         set address [scanline $filename $linenum]
         if {$address ne {}} {
-            return [debug breakpoint create -address 0x$address -condition $cond -command $cmd]
+            return [debug breakpoint create -address $address -condition $cond -command $cmd]
         } else {
             error "address not found"
         }
