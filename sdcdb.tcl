@@ -33,12 +33,13 @@
 namespace eval sdcdb {
 
 set ::env(DEBUG) 1
-variable c_files_count          ;# C files reference
-array set c_files     {}        ;# pool of c source files
-array set addr2file   {}        ;# array that maps source from address
-array set g_file2addr {}        ;# array that maps address from source (global)
-# array set <filename>2addr     ;# same, but dinamically created array for each SDCC module (C file)
-# array set <function>2line     ;# array that maps function to source (global)
+variable old_address 0
+variable c_files_count                  ;# C files reference
+array set c_files     {}                ;# pool of c source files
+array set addr2file   {}                ;# array that maps to source from address
+array set g_func2addr {}                ;# array that maps to address from source (global)
+# array set <filename>2addr             ;# same, but dinamically created array for each SDCC module (C file)
+# array set <filename>_func2addr        ;# array that maps function to source (global)
 
 set_help_proc sdcdb [namespace code sdcdb_help]
 proc sdcdb_help {args} {
@@ -165,10 +166,15 @@ proc sdcdb_open {path} {
     read_cdb $file
 }
 
+proc create_var {arrayname} {
+    variable $arrayname
+    array set $arrayname {}
+}
+
 proc complete {arrayname name list} {
-    upvar $arrayname var
-    if {![info exists var($name)]} { warn "$arrayname\($name\) ignored"; return 0 }
-    set var($name) [concat {*}$var($name) {*}$list]
+    variable $arrayname
+    if {![info exists ${arrayname}($name)]} { warn "$arrayname\($name\) ignored"; return 0 }
+    set ${arrayname}($name) [concat {*}${arrayname}($name) {*}$list]
     return 1
 }
 
@@ -194,15 +200,14 @@ proc read_cdb {fname} {
             lassign $match {} context {} {} funcname
             switch -- [string index $context 0] {
                 G {
-                    variable g_file2addr
-                    set g_file2addr($funcname) {}
-                    warn "g_file2addr\($funcname\) created"
+                    variable g_func2addr
+                    set g_func2addr($funcname) {}
+                    warn "g_func2addr\($funcname\) created"
                 }
                 F {
-                    set arrayname [string range $context 1 [string length $context]]2addr
-                    upvar $arrayname var
-                    variable var
-                    set var($funcname) {}
+                    set arrayname [string range $context 1 [string length $context]]_func2addr
+                    variable $arrayname
+                    set ${arrayname}($funcname) {}
                     warn "${arrayname}\($funcname\) created"
                 }
                 L {
@@ -217,12 +222,11 @@ proc read_cdb {fname} {
             incr c_files_count($filename)
             # Put line -> address mapping of array with dynamic name
             set arrayname [file rootname $filename]2addr
-            if {$c_files_count($filename) eq 1} { warn "Added C file '$arrayname'" }
-            upvar $arrayname var
-            variable var
-            set var($linenum) [expr 0x$address]
+            if {$c_files_count($filename) eq 1} { warn "Created new dynamic array $arrayname" }
+            variable $arrayname
+            set ${arrayname}($linenum) [expr 0x$address]
             set addr2file([expr 0x$address]) [list file $filename line $linenum]
-            warn "${arrayname}\($linenum\): $var($linenum)"
+            warn "${arrayname}\($linenum\): ${arrayname}($linenum)"
             incr c_count
             continue
         }
@@ -232,18 +236,17 @@ proc read_cdb {fname} {
             # Put function begin record in array with dynamic name
             switch -- [string index $context 0] {
                 G {
-                    variable g_file2addr
-                    if {[complete g_file2addr $funcname [list begin [expr 0x$address]]]} {
-                        warn "g_file2addr\($funcname\): $g_file2addr($funcname)"
+                    variable g_func2addr
+                    if {[complete g_func2addr $funcname [list begin [expr 0x$address]]]} {
+                        warn "g_func2addr\($funcname\): $g_func2addr($funcname)"
                         incr gf_count
                     }
                 }
                 F {
-                    set arrayname [string range $context 1 [string length $context]]2addr
-                    upvar $arrayname var
-                    variable var
-                    if {[complete var $funcname [list begin [expr 0x$address]]]} {
-                        warn "${filename}2addr\($funcname\): $var($funcname)"
+                    set arrayname [string range $context 1 [string length $context]]_func2addr
+                    variable $arrayname
+                    if {[complete $arrayname $funcname [list begin [expr 0x$address]]]} {
+                        warn "${arrayname}\($funcname\): ${arrayname}($funcname)"
                         incr sf_count
                     }
                 }
@@ -259,17 +262,16 @@ proc read_cdb {fname} {
             # Put function end record in array with dynamic name
             switch -- [string index $context 0] {
                 G {
-                    variable g_file2addr
-                    if {[complete g_file2addr $funcname [list end [expr 0x$address]]]} {
-                        warn "X: g_file2addr\($funcname\): $g_file2addr($funcname)"
+                    variable g_func2addr
+                    if {[complete g_func2addr $funcname [list end [expr 0x$address]]]} {
+                        warn "X: g_func2addr\($funcname\): $g_func2addr($funcname)"
                     }
                 }
                 F {
-                    set arrayname [string range $context 1 [string length $context]]2addr
-                    upvar $arrayname var
-                    global var
-                    if {[complete var $funcname [list end [expr 0x$address]]]} {
-                        warn "X: ${arrayname}\($funcname\): $var($funcname)"
+                    set arrayname [string range $context 1 [string length $context]]_func2addr
+                    variable $arrayname
+                    if {[complete $arrayname $funcname [list end [expr 0x$address]]]} {
+                        warn "X: ${arrayname}\($funcname\): ${arrayname}($funcname)"
                     }
                 }
                 L {
@@ -285,6 +287,43 @@ proc read_cdb {fname} {
     output "$c_count C source lines found"
     output "$gf_count global function(s) registered"
     output "$sf_count static function(s) registered"
+    fix_databases
+}
+
+proc print_var {arrayname} {
+    variable $arrayname
+    foreach key [array names $arrayname] {
+        output "* $key: ${arrayname}($key)"
+    }
+}
+
+proc fix_blank_spaces {arrayname} {
+    variable $arrayname 
+    set count 0
+    set old_key {}
+    foreach key [lsort -integer [array names $arrayname]] {
+        if {$old_key ne {} && $old_key != [expr $key - 1]} {
+            for {set i [expr $old_key + 1]} {$i < $key} {incr i} {
+                #warn "Setting $arrayname\($i\) to ${arrayname}\($old_key\) = [set ${arrayname}($old_key)]"
+                set ${arrayname}($i) [set ${arrayname}($old_key)]
+                incr count
+            }
+        }
+        set old_key $key
+    }
+    return $count
+}
+
+proc fix_databases {} {
+    variable c_files
+    foreach filename [array names c_files] {
+        set arrayname [file rootname $filename]2addr
+        variable $arrayname
+        set count [fix_blank_spaces $arrayname]
+        output "filled $count empty occurrences in $arrayname"
+    }
+    set count [fix_blank_spaces addr2file]
+    output "filled $count empty occurrences in addr2file"
 }
 
 proc sdcdb_add {path} {
@@ -372,20 +411,19 @@ proc list_fun {filename funcname} {
 # scan file database then global database for function name
 proc scanfun {filename funcname} {
     if {$filename ne {}} {
-        set arrayname [file rootname $filename]2addr
-        upvar $arrayname var
-        variable var
-        if {![info exists var]} {
+        set arrayname [file rootname $filename]_func2addr
+        variable $arrayname
+        if {![info exists $arrayname]} {
             error "file database '$arrayname' not found"
         }
-        set record [lindex [array get var $funcname] 1]
+        set record [lindex [array get $arrayname $funcname] 1]
     } else {
         set record {}
     }
     if {$record eq {}} {
         # not found in file, search globally
-        variable g_file2addr
-        set record [lindex [array get g_file2addr $funcname] 1]
+        variable g_func2addr
+        set record [lindex [array get g_func2addr $funcname] 1]
     }
     set result [list [lindex $record 1] [lindex $record 3]]
     return [eval list $result]
@@ -393,16 +431,15 @@ proc scanfun {filename funcname} {
 
 # reverse function search (global first, then search all files)
 proc scanfun_r {funcname} {
-    variable g_file2addr
-    set record [lindex [array get g_file2addr $funcname] 1]
+    variable g_func2addr
+    set record [lindex [array get g_func2addr $funcname] 1]
     if {$record eq {}} {
         variable c_files
         foreach filename c_files {
-            set arrayname [file rootname $filename]2addr
-            upvar $arrayname var
-            variable var
-            if {[info exists var($funcname)]} {
-                set record [lindex [array get var $line] 1]
+            set arrayname [file rootname $filename]_func2addr
+            variable $arrayname
+            if {[info exists ${arrayname}($funcname)]} {
+                set record [lindex [array get $arrayname $line] 1]
                 break
             }
         }
@@ -413,12 +450,11 @@ proc scanfun_r {funcname} {
 
 proc scanline {file line} {
     set arrayname [file rootname $file]2addr
-    upvar $arrayname var
-    variable var
-    if {![info exists var]} {
+    variable $arrayname
+    if {![info exists $arrayname]} {
         error "source file not found"
     }
-    set record [array get var $line]
+    set record [array get $arrayname $line]
     if {$record eq {}} {
         error "line $line not found in file '$file'"
     }
@@ -436,7 +472,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
         set address [scanline $filename $linenum]
         if {$address ne {}} {
             debug breakpoint create -address $address -condition $cond -command $cmd
-	    return
+            return
         } else {
             error "address not found"
         }
@@ -447,7 +483,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
         lassign [scanfun $filename $funcname] start {}
         if {$start ne {}} {
             debug breakpoint create -address $start -condition $cond -command $cmd
-	    return
+            return
         } else {
             error "function not found"
         }
@@ -460,7 +496,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
             error "function not found"
         }
         debug breakpoint create -address $start -condition $cond -command $cmd
-	return
+        return
     } else {
         error "error parsing break command"
     }
@@ -508,19 +544,25 @@ proc sdcdb_quit {} {
     if {[info exists c_files]} {
         foreach filename c_files {
             set arrayname [file rootname $filename]2addr
-            upvar $arrayname var
-            variable var
-            unset var
+            variable $arrayname
+            unset $arrayname
+            set arrayname [file rootname $filename]_func2addr
+            variable $arrayname
+            unset $arrayname
         }
         unset c_files
         variable c_files_count
         unset c_files_count
         variable addr2file
         unset addr2file
-        variable g_file2addr
-        unset g_file2addr
+        variable g_func2addr
+        unset g_func2addr
         output "done"
     }
+}
+
+proc is_array {name} {
+    return [array exists $name]
 }
 
 namespace export sdcdb
@@ -529,3 +571,14 @@ namespace export sdcdb
 
 # Import sdcdb exported functions
 namespace import sdcdb::*
+
+proc list_vars {} {
+    foreach var [info vars sdcdb::*] {
+        if {[sdcdb::is_array $var]} {
+            puts "is_array  $var, size: [array size $var]"
+        } elseif {[info exists $var]} {
+            puts "is_scalar $var = [set $var]"
+        }
+    }
+}
+
