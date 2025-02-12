@@ -40,6 +40,10 @@ array set addr2file     {}              ;# array that maps to source from addres
 array set g_func2addr   {}              ;# array that maps to address from source (global)
 # array set <filename>2addr             ;# same, but dinamically created array for each SDCC module (C file)
 # array set <filename>_func2addr        ;# array that maps function to source (global)
+variable current_pos    {}              ;# debugger step/next status
+variable cond           {}              ;# breakpoint check condition
+variable old_PC         {}
+variable times_left     0
 
 set_help_proc sdcdb [namespace code sdcdb_help]
 proc sdcdb_help {args} {
@@ -142,6 +146,8 @@ proc dispatcher {args} {
         "break" { return [sdcdb_break      {*}$params] }
         "list"  { return [sdcdb_list       {*}$params] }
         "info"  { return [sdcdb_info       {*}$params] }
+        step    { return [sdcdb_step       {*}$params] }
+        "next"  { return [sdcdb_next       {*}$params] }
         default { error "Unknown command \"[lindex $args 0]\"." }
     }
 }
@@ -387,34 +393,36 @@ proc sdcdb_list {args} {
     return [list_pc]
 }
 
-proc list_file {file start {end {}}} {
+proc list_file {file start {end {}} {focus -1}} {
     variable c_files
     set record [array get c_files $file]
     if {$record eq {}} {
         error "file '$file' not found in source list, add a directory that contains such file with 'sdcdb add <dir>'"
     }
     set fh [open [lindex $record 1] r]
-    set count 0
+    set pos 0
     # 10 lines by default
     if {$end eq {}} { set end [expr $start + 9] }
     while {[gets $fh line] >= 0} {
-        incr count
-        if {$count >= $start} {
-            output "[format %-5d $count]:    $line"
+        incr pos
+        if {$pos >= $start} {
+            if {$pos == $focus} {
+                output "[format %-5d $pos]*    $line"
+            } else {
+                output "[format %-5d $pos]:    $line"
+            }
         }
-        if {$count >= $end} {
-            break
-        }
+	if {$pos >= $end} { break }
     }
     close $fh
 }
 
-proc list_pc {} {
+proc list_pc {{x0 -1} {x1 9}} {
     variable addr2file
     if {[array get addr2file [reg PC]] ne {}} {
         debug break  ;# makes no sense to list a running program
-        lassign $addr2file([reg PC]) {} file {} start
-        return [list_file $file [expr $start - 1] [expr $start + 9]]
+        lassign $addr2file([reg PC]) {} file {} begin
+        return [list_file $file [expr $begin + $x0] [expr $begin + $x1] $begin]
     }
     output "address database not found for 0x[format %04X [reg PC]]"
 }
@@ -493,9 +501,9 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern1 $pos]
     if {[llength $match] == 3} {
         lassign $match {} filename linenum
-        set address [scanline $filename $linenum]
-        if {$address ne {}} {
-            debug breakpoint create -address $address -condition $cond -command $cmd
+        set record [scanline $filename $linenum]
+        if {$record ne {}} {
+            debug breakpoint create -address [lindex $record 1] -condition $cond -command $cmd
             return
         } else {
             error "address not found"
@@ -526,14 +534,54 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     }
 }
 
-proc sdcdb_next {{times 1}} {
-    debug break  ;# just to be sure
-    error "not implemented yet"
+proc _check {} {
+    variable old_PC
+    return [reg PC] != $old_PC
 }
 
-proc sdcdb_step {{times 1} {next {}}} {
+proc _update {} {
+    variable current_pos
+    if {$current_pos eq {}} {
+        debug break
+    }
+    lassign $current_pos {} begin {} end
+    # outside current C instruction?
+    if {[reg PC] < $begin || [reg PC] > $end} {
+        variable times_left
+        incr times_left -1
+        if {$times_left <= 0} {
+            debug break
+            list_pc -1 1
+            variable cond
+            debug condition remove $cond
+            set cond {}
+        } else {
+            output "times_left: $times_left, position: [format %04X [reg PC]]"
+        }
+    }
+}
+
+proc sdcdb_step {{n 1}} {
     debug break  ;# just to be sure
-    error "not implemented yet"
+    variable cond
+    if {$cond eq {}} {
+        variable old_PC [reg PC]
+        set cond [debug condition create -condition {[sdcdb::_check]} -command sdcdb::_update]
+    }
+    # get current position in source code
+    variable addr2file
+    set pos [lindex [array get addr2file [reg PC]] 1]
+    warn "pos: $pos"
+    if {$pos ne {}} {
+        warn "pos: $pos"
+        variable current_pos $pos
+    }
+    variable times_left $n
+    debug cont
+}
+
+proc sdcdb_next {{n 1}} {
+    sdcdb_step $n
 }
 
 proc print_info {} {
