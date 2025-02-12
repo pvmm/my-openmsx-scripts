@@ -16,7 +16,7 @@
 #
 # open path_to_CDB_file
 #       - Read CDB file specified by a path parameter
-# add path_to_source_dir
+# add ?-recursive? path_to_source_dir
 #       - Scan directory for C source files
 # break line
 #       - creates breakpoint in <file>:<line>
@@ -470,19 +470,29 @@ proc sdcdb_list {args} {
     return [list_pc]
 }
 
-proc list_file {file start {end {}} {focus -1}} {
+proc list_file {file start {end {}} {focus -1} {showerror 0}} {
     if {[file extension $file] eq ".c"} {
         variable c_files
         set record [array get c_files $file]
         if {$record eq {}} {
-            error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
+            if {$showerror} {
+                error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
+            } else {
+                output "$file: not found"
+            }
+            return
         }
     }
     if {[file extension $file] eq [ASM]} {
         variable a_files
         set record [array get a_files $file]
         if {$record eq {}} {
-            error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
+            if {$showerror} {
+                error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
+            } else {
+                output "$file: not found"
+            }
+            return
         }
     }
     set fh [open [lindex $record 1] r]
@@ -637,7 +647,7 @@ proc update_result {} {
     variable current_line
     set record [find_source [reg PC]]
     # has position in file changed?
-    if {$record ne [list $current_file $current_line]} {
+    if {$record ne {} && $record ne [list $current_file $current_line]} {
         variable times_left
         lassign $record current_file current_line
         output "file: $current_file:$current_line, position: 0x[format %04X [reg PC]] (loop $times_left)"
@@ -678,20 +688,17 @@ proc sdcdb_step {{n 1}} {
     # get current position in source code
     set record [find_source [reg PC]]
     lassign $record file line
-    if {$record ne {}} {
-        warn "record: $record"
-        warn "search_file_array: $file, $line -> [search_file_array $file $line]"
-        lassign [search_file_array $file $line] begin end
-        # HERE!
-        warn "pos: [format %04X $begin] [format %04X $end]"
+    lassign [search_file_array $file $line] begin end
+    warn "search_file_array: $file, $line -> [search_file_array $file $line]"
+    if {$begin ne {} && $end ne {}} {
         variable current_file $file
         variable current_line $line
         variable current_cond [list $begin $end]
         variable times_left $n
         debug cont
     } else {
-        # fallback to normal step
-        debug step
+        output "out of scope, skipping till we come back."
+        debug cont
     }
 }
 
@@ -705,10 +712,6 @@ proc print_info {} {
         lassign $addr2file([reg PC]) file line
         if {$file eq {}} {
             error "address [format %04X [reg PC]] not found in database."
-        }
-        variable c_files
-        if {[array get c_files $file] eq {}} {
-            error "Cannot localize source code file: '$file' missing.\nUse 'sdcdb add <path>' to add more source files to the source database."
         }
         list_file $file [expr $line - 1] [expr $line + 1] $line
     } else {
