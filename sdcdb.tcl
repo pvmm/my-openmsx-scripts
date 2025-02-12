@@ -25,8 +25,20 @@
 # info ?-break?
 #       - Display information on source code under the program counter. The -break
 #         parameter stops execution.
+# step ?n?
+#       - Executes next n lines of C code step by step, proceeding through subroutine calls.
+#         n defaults to 1.
 # quit
 #       - Free all used memory.
+#
+# Known limitations:
+# [*] don't create C files with same name in different folders (in projects with multiple
+#     folders), since CDB files don't keep track of directories, just file names. SDCDB
+#     will get lost and report the wrong position because of missing files during break or
+#     step.
+# [*] don't create projects with assembly and C files with the same name, since SDCC
+#     already creates an .asm file for every .c file in your project. SDCDB will get lost
+#     and report the wrong position because of missing files during break or step.
 #
 # For more information about the CDB file format: https://sourceforge.net/p/sdcc/wiki/Home/
 
@@ -35,22 +47,28 @@ namespace eval sdcdb {
 set ::env(DEBUG) 1
 variable initialized    0
 variable c_files_count                  ;# C files reference
+variable a_files_count                  ;# ASM files reference
 array set c_files       {}              ;# pool of c source files
+array set a_files       {}              ;# pool of a source files
 array set addr2file     {}              ;# array that maps to source from address
 array set g_func2addr   {}              ;# array that maps to address from source (global)
-# array set <filename>2addr             ;# same, but dinamically created array for each SDCC module (C file)
+# array set c_<filename>2addr           ;# same, but dinamically created array for each SDCC module (C file)
+# array set a_<filename>2addr           ;# same, but dinamically created array for each SDCC module (ASM file)
 # array set <filename>_func2addr        ;# array that maps function to source (global)
-variable current_pos    {}              ;# debugger step/next status
+variable current_cond   {}              ;# debugger step/next boundary: {begin end} addresses
+variable current_file   {}              ;# debugger file
+variable current_line   {}              ;# debugger line
 variable cond           {}              ;# breakpoint check condition
 variable old_PC         {}
 variable times_left     0
+proc ASM {} { return ".asm" }
 
 set_help_proc sdcdb [namespace code sdcdb_help]
 proc sdcdb_help {args} {
     if {[llength $args] == 1} {
         return {The SDCDB debugger in Tcl connects OpenMSX to the CDB file created by SDCC.
 
-Recognized commands: open, add, break, list, info, quit
+Recognized commands: open, add, break, list, step, info, whereis, quit
 
 Type 'help sdcdb <command>' for more information about each command.
 }
@@ -83,11 +101,21 @@ Syntax: sdcdb list
         sdcdb list <file>:<functionName>
         sdcdb list <functionName>
 }}
+        "step" { return {Steps through next n lines of C code
+
+The 'sdcdb step' command will proceed through subroutine calls. You may specify how many times 'sdcdb step' should execute (defaults to 1).
+
+Syntax: sdcdb step ?n?
+}}
         "info" { return {Displays information about current line of source code
 
 A '-break' parameter stops execution after displaying the information.
 
 Syntax: sdcdb info ?-break?
+}}
+        "whereis" { return {Displays if source file was found in the database
+
+Syntax: sdcdb whereis <sourceFileName>
 }}
         "quit" { return {Closes files and frees all memory.
 
@@ -135,6 +163,7 @@ proc dispatcher {args} {
     switch -- $cmd {
         "open"  { return [sdcdb_open       {*}$params] }
         add     { return [sdcdb_add        {*}$params] }
+        whereis { return [sdcdb_whereis    {*}$params] }
         quit    { return [sdcdb_quit       {*}$params] }
     }
     # remaining commands need initialization
@@ -182,13 +211,16 @@ proc read_cdb {fname} {
     # function pattern: search for "F:G$function_name$..." lines
     # 'F:G$debug_break$0_0$0({2}DF,SV:S),Z,0,0,0,0,0'
     set func_pat {^F:(G|F([^$]+)|L([^$]+))\$([^$]+)\$.*}
-    # line number pattern: search for "L:C$filename$line$level$block:address" lines
-    set line_pat {^L:C\$([^$]+)\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
+    # C line number pattern: search for "L:C$filename$line$level$block:address" lines
+    set cline_pat {^L:C\$([^$]+)\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
+    # ASM line number pattern: search for "L:A$filename$line:address" lines
+    set aline_pat {^L:A\$([^$]+)\$([^$]+):([^$]+)$}
     # function begin pattern: search for "L:(G|F<name>|L<name>)$function$level$block:address" lines
     set func_bn_pat {^L:(G|F([^$]+)|L([^$]+))\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
     # function end pattern: search for "L:X(G|F<name>|L<name>)$function$level$block:address" lines
     set func_ed_pat {^L:X(G|F([^$]+)|L([^$]+))\$([^$]+)\$([^$]+)\$([^$]+):(\S+)$}
     set c_count 0  ;# lines of C code
+    set a_count 0  ;# lines of asm code
     set gf_count 0 ;# global functions
     set sf_count 0 ;# static functions
     while {[gets $fh line] != -1} {
@@ -213,18 +245,36 @@ proc read_cdb {fname} {
             }
             continue
         }
-        set match [regexp -inline $line_pat $line]
+        set match [regexp -inline $cline_pat $line]
         if {[llength $match] == 6} {
             lassign $match {} filename linenum {} {} address
             incr c_files_count($filename)
             # Put line -> address mapping of array with dynamic name
-            set arrayname [file rootname $filename]2addr
-            if {$c_files_count($filename) eq 1} { warn "Created new dynamic array $arrayname" }
+            set arrayname c_[file rootname $filename]2addr
+            if {$c_files_count($filename) eq 1} {
+                warn "Created new dynamic array $arrayname"
+            }
             variable $arrayname
             set ${arrayname}($linenum) [expr 0x$address]
-            set addr2file([expr 0x$address]) [list file $filename line $linenum]
-            warn "${arrayname}\($linenum\): ${arrayname}($linenum)"
+            set addr2file([expr 0x$address]) [list $filename $linenum]
+            warn "mapping C source ${arrayname}\($linenum\): [set ${arrayname}($linenum)]"
             incr c_count
+            continue
+        }
+        set match [regexp -inline $aline_pat $line]
+        if {[llength $match] == 4} {
+            lassign $match {} filename linenum address
+            incr a_files_count($filename[ASM])  ;# SDCC removes the file extension for some reason
+            # Put line -> address mapping of array with dynamic name
+            set arrayname a_[file rootname $filename]2addr
+            if {$a_files_count($filename[ASM]) eq 1} {
+                warn "Created new dynamic array $arrayname"
+            }
+            variable $arrayname
+            set ${arrayname}($linenum) [expr 0x$address]
+            set addr2file([expr 0x$address]) [list $filename[ASM] $linenum]
+            warn "mapping asm source ${arrayname}\($linenum\): [set ${arrayname}($linenum)]"
+            incr a_count
             continue
         }
         set match [regexp -inline $func_bn_pat $line]
@@ -234,16 +284,16 @@ proc read_cdb {fname} {
             switch -- [string index $context 0] {
                 G {
                     variable g_func2addr
-                    if {[complete g_func2addr $funcname [list begin [expr 0x$address]]]} {
-                        warn "g_func2addr\($funcname\): $g_func2addr($funcname)"
+                    if {[complete g_func2addr $funcname [list [expr 0x$address]]]} {
+                        warn "1:mapping function g_func2addr\($funcname\): [set g_func2addr($funcname)]"
                         incr gf_count
                     }
                 }
                 F {
                     set arrayname [string range $context 1 [string length $context]]_func2addr
                     variable $arrayname
-                    if {[complete $arrayname $funcname [list begin [expr 0x$address]]]} {
-                        warn "${arrayname}\($funcname\): ${arrayname}($funcname)"
+                    if {[complete $arrayname $funcname [list [expr 0x$address]]]} {
+                        warn "1:mapping function ${arrayname}\($funcname\): [set ${arrayname}($funcname)]"
                         incr sf_count
                     }
                 }
@@ -260,15 +310,15 @@ proc read_cdb {fname} {
             switch -- [string index $context 0] {
                 G {
                     variable g_func2addr
-                    if {[complete g_func2addr $funcname [list end [expr 0x$address]]]} {
-                        warn "X: g_func2addr\($funcname\): $g_func2addr($funcname)"
+                    if {[complete g_func2addr $funcname [list [expr 0x$address]]]} {
+                        warn "2:mapping function g_func2addr\($funcname\): [set g_func2addr($funcname)]"
                     }
                 }
                 F {
                     set arrayname [string range $context 1 [string length $context]]_func2addr
                     variable $arrayname
-                    if {[complete $arrayname $funcname [list end [expr 0x$address]]]} {
-                        warn "X: ${arrayname}\($funcname\): ${arrayname}($funcname)"
+                    if {[complete $arrayname $funcname [list [expr 0x$address]]]} {
+                        warn "2: mapping function ${arrayname}\($funcname\): [set ${arrayname}($funcname)]"
                     }
                 }
                 L {
@@ -281,7 +331,9 @@ proc read_cdb {fname} {
     }
     close $fh
     output "[array size c_files_count] C files references added"
+    output "[array size a_files_count] assembly files references added"
     output "$c_count C source lines found"
+    output "$a_count assembly source lines found"
     output "$gf_count global function(s) registered"
     output "$sf_count static function(s) registered"
 }
@@ -311,36 +363,45 @@ proc fix_blank_spaces {arrayname} {
 }
 
 proc fix_last_address {arrayname} {
-    variable $arrayname 
+    variable $arrayname
     set old_key {}
     set sorted [lsort -integer [array names $arrayname]]
     foreach key $sorted {
         if {$old_key ne {} && [set ${arrayname}($old_key)] ne [set ${arrayname}($key)]} {
-            set ${arrayname}($old_key) [list begin [set ${arrayname}($old_key)] end [expr [set ${arrayname}($key)] - 1]]
+            set ${arrayname}($old_key) [list [set ${arrayname}($old_key)] [expr [set ${arrayname}($key)] - 1]]
             incr count
         } elseif {$old_key ne {}} {
-            set ${arrayname}($old_key) [list begin [set ${arrayname}($old_key)] end [set ${arrayname}($old_key)]]
+            set ${arrayname}($old_key) [list [set ${arrayname}($old_key)] [set ${arrayname}($old_key)]]
         }
         set old_key $key
     }
     if {[llength $sorted] > 0} {
         # change last value
         set last [lindex $sorted end]
-        set ${arrayname}($last) [list begin [set ${arrayname}($last)] end [set ${arrayname}($last)]]
+        set ${arrayname}($last) [list [set ${arrayname}($last)] [set ${arrayname}($last)]]
         incr count
     }
 }
 
 proc process_data {} {
     variable c_files
-    set count 0
     foreach filename [array names c_files] {
-        set arrayname [file rootname $filename]2addr
+        set arrayname c_[file rootname $filename]2addr
         variable $arrayname
+        warn "0fix_last_address: $arrayname"
+        fix_last_address $arrayname
+        fix_blank_spaces $arrayname
+    }
+    variable a_files
+    foreach filename [array names a_files] {
+        set arrayname a_[file rootname $filename]2addr
+        variable $arrayname
+        warn "1fix_last_address: $arrayname"
         fix_last_address $arrayname
         fix_blank_spaces $arrayname
     }
     fix_blank_spaces addr2file
+    return
 }
 
 proc recursive_glob {dir pattern} {
@@ -357,17 +418,24 @@ proc recursive_glob {dir pattern} {
     return $result
 }
 
+proc add_files_to_database {arrayname files} {
+    variable $arrayname
+    foreach path $files {
+        set filename [file tail $path]
+        if {[array get $arrayname $filename] ne {}} {
+            warn "file '$filename' already registered in $arrayname, new entry ignored."
+        }
+        set ${arrayname}($filename) $path
+    }
+}
+
 proc sdcdb_add {path} {
     set new_files [recursive_glob $path *.c]
     warn "adding files: [join $new_files {, }]"
-    variable c_files
-    foreach path $new_files {
-        set filename [file tail $path]
-        if {[array get c_files $filename] ne {}} {
-            warn "file '$filename' already registered, new entry ignored."
-        }
-        set c_files($filename) $path
-    }
+    add_files_to_database c_files $new_files
+    set new_files [recursive_glob $path *[ASM]]
+    warn "adding files: [join $new_files {, }]"
+    add_files_to_database a_files $new_files
 }
 
 proc sdcdb_list {args} {
@@ -394,10 +462,19 @@ proc sdcdb_list {args} {
 }
 
 proc list_file {file start {end {}} {focus -1}} {
-    variable c_files
-    set record [array get c_files $file]
-    if {$record eq {}} {
-        error "file '$file' not found in source list, add a directory that contains such file with 'sdcdb add <dir>'"
+    if {[file extension $file] eq ".c"} {
+        variable c_files
+        set record [array get c_files $file]
+        if {$record eq {}} {
+            error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
+        }
+    }
+    if {[file extension $file] eq [ASM]} {
+        variable a_files
+        set record [array get a_files $file]
+        if {$record eq {}} {
+            error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
+        }
     }
     set fh [open [lindex $record 1] r]
     set pos 0
@@ -412,7 +489,7 @@ proc list_file {file start {end {}} {focus -1}} {
                 output "[format %-5d $pos]:    $line"
             }
         }
-	if {$pos >= $end} { break }
+        if {$pos >= $end} { break }
     }
     close $fh
 }
@@ -421,22 +498,22 @@ proc list_pc {{x0 -1} {x1 9}} {
     variable addr2file
     if {[array get addr2file [reg PC]] ne {}} {
         debug break  ;# makes no sense to list a running program
-        lassign $addr2file([reg PC]) {} file {} begin
+        lassign $addr2file([reg PC]) file begin
         return [list_file $file [expr $begin + $x0] [expr $begin + $x1] $begin]
     }
     output "address database not found for 0x[format %04X [reg PC]]"
 }
 
 proc list_fun {filename funcname} {
-    lassign [scanfun $filename $funcname] start end
+    lassign [scanfun $filename $funcname] begin end
     variable addr2file
-    if {[array get addr2file $start] ne {}} {
-        lassign $addr2file($start) {} file {} start 
-        lassign $addr2file($end)   {}  {}  {} end
+    if {[array get addr2file $begin] ne {}} {
+        lassign $addr2file($begin) file begin
+        lassign $addr2file($end)   {}   end
         if {$file ne $filename} {
             error "function database '$funcname' not found in '$filename'"
         }
-        return [list_file $file [expr $start - 1] $end]
+        return [list_file $file [expr $begin - 1] $end]
     }
     error "function database '$funcname' not found"
 }
@@ -458,7 +535,7 @@ proc scanfun {filename funcname} {
         variable g_func2addr
         set record [lindex [array get g_func2addr $funcname] 1]
     }
-    set result [list [lindex $record 1] [lindex $record 3]]
+    set result $record
     return [eval list $result]
 }
 
@@ -477,21 +554,27 @@ proc scanfun_r {funcname} {
             }
         }
     }
-    set result [list [lindex $record 1] [lindex $record 3]]
+    set result $record
     return [eval list $result]
 }
 
-proc scanline {file line} {
-    set arrayname [file rootname $file]2addr
-    variable $arrayname
-    if {![info exists $arrayname]} {
-        error "source file not found"
+proc search_file_array {file line} {
+    set tmp [file rootname $file]
+    if {[file extension $file] eq ".c"} {
+        set arrayname c_${tmp}2addr
+        variable c_${tmp}2addr
+    } else {
+        set arrayname a_${tmp}2addr
+        variable a_${tmp}2addr
     }
-    set record [array get $arrayname $line]
-    if {$record eq {}} {
+    if {![info exists $arrayname]} {
+        error "'$file': source file not found ($arrayname)"
+    }
+    set result [array get $arrayname $line]
+    if {$result eq {}} {
         error "line $line not found in file '$file'"
     }
-    return [lindex $record 1]
+    return [lindex $result 1]
 }
 
 proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
@@ -501,7 +584,7 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     set match [regexp -inline $pattern1 $pos]
     if {[llength $match] == 3} {
         lassign $match {} filename linenum
-        set record [scanline $filename $linenum]
+        set record [search_file_array $filename $linenum]
         if {$record ne {}} {
             debug breakpoint create -address [lindex $record 1] -condition $cond -command $cmd
             return
@@ -534,31 +617,46 @@ proc sdcdb_break {pos {cond {}} {cmd {sdcdb info -break}}} {
     }
 }
 
-proc _check {} {
+proc check {} {
     variable old_PC
     return [reg PC] != $old_PC
 }
 
-proc _update {} {
-    variable current_pos
-    if {$current_pos eq {}} {
-        debug break
-    }
-    lassign $current_pos {} begin {} end
+proc update_result {} {
     # outside current C instruction?
-    if {[reg PC] < $begin || [reg PC] > $end} {
+    variable current_file
+    variable current_line
+    set record [find_source [reg PC]]
+    # has position in file changed?
+    if {$record ne [list $current_file $current_line]} {
         variable times_left
+        lassign $record current_file current_line
+        output "file: $current_file:$current_line, position: 0x[format %04X [reg PC]] (loop $times_left)"
+        list_pc -1 1
+        #lassign $current_cond begin end
         incr times_left -1
         if {$times_left <= 0} {
-            debug break
-            list_pc -1 1
+            output "done."
             variable cond
             debug condition remove $cond
             set cond {}
+            debug break
         } else {
-            output "times_left: $times_left, position: [format %04X [reg PC]]"
+            debug cont
         }
     }
+    #if {[reg PC] < $begin || [reg PC] > $end}
+}
+
+proc find_source {address} {
+    variable addr2file
+    # get current source file
+    set record [lindex [array get addr2file [reg PC]] 1]
+    if {$record ne {}} {
+        warn "record: 0x[format %04X [reg PC]] -> $record"
+        return $record
+    }
+    return {}
 }
 
 proc sdcdb_step {{n 1}} {
@@ -566,18 +664,26 @@ proc sdcdb_step {{n 1}} {
     variable cond
     if {$cond eq {}} {
         variable old_PC [reg PC]
-        set cond [debug condition create -condition {[sdcdb::_check]} -command sdcdb::_update]
+        set cond [debug condition create -condition {[sdcdb::check]} -command sdcdb::update_result]
     }
     # get current position in source code
-    variable addr2file
-    set pos [lindex [array get addr2file [reg PC]] 1]
-    warn "pos: $pos"
-    if {$pos ne {}} {
-        warn "pos: $pos"
-        variable current_pos $pos
+    set record [find_source [reg PC]]
+    lassign $record file line
+    if {$record ne {}} {
+        warn "record: $record"
+        warn "search_file_array: $file, $line -> [search_file_array $file $line]"
+        lassign [search_file_array $file $line] begin end
+        # HERE!
+        warn "pos: [format %04X $begin] [format %04X $end]"
+        variable current_file $file
+        variable current_line $line
+        variable current_cond [list $begin $end]
+        variable times_left $n
+        debug cont
+    } else {
+        # fallback to normal step
+        debug step
     }
-    variable times_left $n
-    debug cont
 }
 
 proc sdcdb_next {{n 1}} {
@@ -587,16 +693,15 @@ proc sdcdb_next {{n 1}} {
 proc print_info {} {
     variable addr2file
     if {[array get addr2file [reg PC]] ne {}} {
-        lassign $addr2file([reg PC]) {} file {} line
+        lassign $addr2file([reg PC]) file line
         if {$file eq {}} {
             error "address [format %04X [reg PC]] not found in database."
         }
         variable c_files
         if {[array get c_files $file] eq {}} {
-            output c_files: [array get c_files]
             error "Cannot localize source code file: '$file' missing.\nUse 'sdcdb add <path>' to add more source files to the source database."
         }
-        list_file $file [expr $line - 1] [expr $line + 1]
+        list_file $file [expr $line - 1] [expr $line + 1] $line
     } else {
         error "line mapping not found for 0x[format %04X [reg PC]]"
     }
@@ -611,15 +716,34 @@ proc sdcdb_info {arg} {
     }
 }
 
+proc sdcdb_whereis {file} {
+    variable c_files
+    if {[info exists c_files($file)]} {
+        output "'$file' found in database (as '[set c_files($file)]')"
+        return
+    }
+    variable a_files
+    if {[info exists a_files($file)]} {
+        output "'$file' found in database (as '[set a_files($file)]')"
+        return
+    }
+    output "'$file' not found in database"
+}
+
 proc sdcdb_quit {} {
     variable initialized
     if {$initialized} {
         variable c_files
         foreach filename c_files {
-            set arrayname [file rootname $filename]2addr
+            set arrayname c_[file rootname $filename]2addr
             variable $arrayname
             unset $arrayname
             set arrayname [file rootname $filename]_func2addr
+            variable $arrayname
+            unset $arrayname
+        }
+        foreach filename a_files {
+            set arrayname a_[file rootname $filename]2addr
             variable $arrayname
             unset $arrayname
         }
@@ -630,7 +754,7 @@ proc sdcdb_quit {} {
         unset addr2file
         variable g_func2addr
         unset g_func2addr
-        output "done"
+        output "done."
     }
 }
 
