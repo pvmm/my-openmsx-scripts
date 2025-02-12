@@ -1,4 +1,4 @@
-# SDCDB Debugger in Tcl - Version 0.6
+# SDCDB Debugger in Tcl - Version 0.7
 #
 # Copyright 2025 Pedro de Medeiros all rights reserved
 #
@@ -54,7 +54,7 @@ array set addr2file     {}              ;# array that maps to source from addres
 array set g_func2addr   {}              ;# array that maps to address from source (global)
 # array set c_<filename>2addr           ;# same, but dinamically created array for each SDCC module (C file)
 # array set a_<filename>2addr           ;# same, but dinamically created array for each SDCC module (ASM file)
-# array set <filename>_func2addr        ;# array that maps function to source (global)
+# array set <filename>_func2addr        ;# array that maps function to source (static)
 variable current_cond   {}              ;# debugger step/next boundary: {begin end} addresses
 variable current_file   {}              ;# debugger file
 variable current_line   {}              ;# debugger line
@@ -186,13 +186,13 @@ proc sdcdb_open {path} {
     if {$initialized} {
         error "SDCDB already initialized"
     }
-    set initialized 1
     set file [glob -type f -directory $path *.cdb]
     if {[llength $file] ne 1} {
         error "unique regular CDB file not found"
     }
     sdcdb_add $path
     read_cdb $file
+    set initialized 1
     process_data
 }
 
@@ -238,9 +238,7 @@ proc read_cdb {fname} {
                     set ${arrayname}($funcname) {}
                     warn "${arrayname}\($funcname\) created"
                 }
-                L {
-                    ;#error "not implemented yet '$line' \[1\]"
-                }
+                L {}
             }
             continue
         }
@@ -296,9 +294,7 @@ proc read_cdb {fname} {
                         incr sf_count
                     }
                 }
-                L {
-                    ;#error "not implemented yet '$line' \[2\]"
-                }
+                L {}
             }
             continue
         }
@@ -433,6 +429,10 @@ proc add_files_to_database {arrayname files} {
 }
 
 proc sdcdb_add {param {path {}}} {
+    variable initialized
+    if {$initialized} {
+        error "SDCDB already initialized"
+    }
     if {$param eq "-recursive"} {
         set function recursive_glob
     } else {
@@ -472,28 +472,21 @@ proc sdcdb_list {args} {
 
 proc list_file {file start {end {}} {focus -1} {showerror 0}} {
     if {[file extension $file] eq ".c"} {
-        variable c_files
-        set record [array get c_files $file]
-        if {$record eq {}} {
-            if {$showerror} {
-                error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
-            } else {
-                output "$file: not found"
-            }
-            return
-        }
+        set files c_files
+    } elseif {[file extension $file] eq [ASM]} {
+        set files a_files
+    } else {
+        error "Unknown or unspecified file extension"
     }
-    if {[file extension $file] eq [ASM]} {
-        variable a_files
-        set record [array get a_files $file]
-        if {$record eq {}} {
-            if {$showerror} {
-                error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
-            } else {
-                output "$file: not found"
-            }
-            return
+    variable $files
+    set record [array get $files $file]
+    if {$record eq {}} {
+        if {$showerror} {
+            error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
+        } else {
+            output "$file: not found"
         }
+        return
     }
     set fh [open [lindex $record 1] r]
     set pos 0
@@ -520,7 +513,7 @@ proc list_pc {{x0 -1} {x1 9}} {
         lassign $addr2file([reg PC]) file begin
         return [list_file $file [expr $begin + $x0] [expr $begin + $x1] $begin]
     }
-    output "address database not found for 0x[format %04X [reg PC]]"
+    output "database address not found for 0x[format %04X [reg PC]]"
 }
 
 proc list_fun {filename funcname} {
@@ -648,12 +641,15 @@ proc update_result {} {
     set record [find_source [reg PC]]
     # has position in file changed?
     if {$record ne {} && $record ne [list $current_file $current_line]} {
-        variable times_left
         lassign $record current_file current_line
-        output "file: $current_file:$current_line, position: 0x[format %04X [reg PC]] (loop $times_left)"
-        list_pc -1 1
-        #lassign $current_cond begin end
+        puts -nonewline "file: $current_file:$current_line, position: 0x[format %04X [reg PC]]"
+        variable times_left
         incr times_left -1
+        if {$times_left > 0} {
+            puts -nonewline " (loop $times_left)"
+        }
+        puts {}
+        list_pc -1 1
         if {$times_left <= 0} {
             output "done."
             variable cond
@@ -694,12 +690,12 @@ proc sdcdb_step {{n 1}} {
         variable current_file $file
         variable current_line $line
         variable current_cond [list $begin $end]
-        variable times_left $n
         debug cont
     } else {
         output "out of scope, skipping till we come back."
         debug cont
     }
+    variable times_left $n
 }
 
 proc sdcdb_next {{n 1}} {
@@ -746,28 +742,39 @@ proc sdcdb_quit {} {
     variable initialized
     if {$initialized} {
         variable c_files
-        foreach filename c_files {
+        foreach filename [array names c_files] {
             set arrayname c_[file rootname $filename]2addr
             variable $arrayname
-            unset $arrayname
+            catch {unset $arrayname}
             set arrayname [file rootname $filename]_func2addr
             variable $arrayname
-            unset $arrayname
+            catch {unset $arrayname}
         }
-        foreach filename a_files {
+        variable a_files
+        foreach filename [array names a_files] {
             set arrayname a_[file rootname $filename]2addr
             variable $arrayname
-            unset $arrayname
+            catch {unset $arrayname}
         }
-        unset c_files
+        catch {unset c_files}
         variable c_files_count
-        unset c_files_count
+        catch {unset c_files_count}
         variable addr2file
-        unset addr2file
+        catch {unset addr2file}
         variable g_func2addr
-        unset g_func2addr
+        catch {unset g_func2addr}
+        variable cond
+        if {$cond ne {}} {
+            debug condition remove $cond
+            set cond {}
+        }
+        set initialized 0
         output "done."
     }
+}
+
+proc h {address} {
+    return [format %04X $address]
 }
 
 namespace export sdcdb
