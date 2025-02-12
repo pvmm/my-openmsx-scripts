@@ -80,9 +80,9 @@ Syntax: sdcdb open <pathToCDBFile>
 }}
         "add" { return {Adds directory to be scanned for source files
 
-'dir' is the path to a directory that will be scanned for more source files to be added to the source database.
+'dir' is the path to a directory that will be scanned for more source files to be added to the source database. -recursive may be specified to also look for files in subdirectories.
 
-Syntax: sdcdb add <dir>
+Syntax: sdcdb add ?-recursive? <dir>
 }}
         "break" { return {Creates a breakpoint
 
@@ -192,7 +192,6 @@ proc sdcdb_open {path} {
         error "unique regular CDB file not found"
     }
     sdcdb_add $path
-    warn "reading $file..."
     read_cdb $file
     process_data
 }
@@ -404,6 +403,10 @@ proc process_data {} {
     return
 }
 
+proc normal_glob {dir pattern} {
+    return [glob -nocomplain -type f -directory $dir $pattern]
+}
+
 proc recursive_glob {dir pattern} {
     set result {}
     foreach file [glob -nocomplain -directory $dir $pattern] {
@@ -429,11 +432,17 @@ proc add_files_to_database {arrayname files} {
     }
 }
 
-proc sdcdb_add {path} {
-    set new_files [recursive_glob $path *.c]
+proc sdcdb_add {param {path {}}} {
+    if {$param eq "-recursive"} {
+        set function recursive_glob
+    } else {
+        set path $param
+        set function normal_glob
+    }
+    set new_files [$function $path *.c]
     warn "adding files: [join $new_files {, }]"
     add_files_to_database c_files $new_files
-    set new_files [recursive_glob $path *[ASM]]
+    set new_files [$function $path *[ASM]]
     warn "adding files: [join $new_files {, }]"
     add_files_to_database a_files $new_files
 }
