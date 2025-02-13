@@ -479,7 +479,9 @@ proc list_file {file begin {end {}} {focus 0} {showerror 0}} {
             error "file '$file' not found in database, add a directory that contains such file with 'sdcdb add <dir>'"
         }
         puts "$file: not found"
+        return
     }
+    debug_out "opening file [lindex $record 1]..."
     set fh [open [lindex $record 1] r]
     set pos 0
     # 10 lines by default
@@ -652,7 +654,7 @@ proc print_status {file line} {
     list_pc -1 1
 }
 
-proc update_step {} {
+proc update_step {{type {step}}} {
     set record [find_source [reg PC]]
     variable current_file
     variable current_line
@@ -666,28 +668,8 @@ proc update_step {} {
     variable times_left
     if {$times_left > 0} {
         # still looping
-        after break sdcdb::update_step
-        debug step
-    }
-}
-
-proc update_step_over {} {
-    set record [find_source [reg PC]]
-    variable current_file
-    variable current_line
-    set record [find_source [reg PC]]
-    if {$record ne {} && $record ne [list $current_file $current_line]} {
-        lassign $record current_file current_line
-        variable times_left
-        incr times_left -1
-        if {$times_left <= 0} { print_status $current_file $current_line }
-        debug break
-    }
-    variable times_left
-    if {$times_left > 0} {
-        # still looping
-        after break sdcdb::update_step_over
-        step_over
+        after break "sdcdb::update_step $type"
+        $type  ;# call "step" or "step_over"
     }
 }
 
@@ -715,13 +697,13 @@ proc prepare_step {{n 1}} {
 }
 
 proc sdcdb_step {{n 1}} {
-    after break sdcdb::update_step
+    after break "sdcdb::update_step"
     prepare_step $n
     debug step
 }
 
 proc sdcdb_next {{n 1}} {
-    after break sdcdb::update_step_over
+    after break "sdcdb::update_step step_over"
     prepare_step $n
     step_over
 }
