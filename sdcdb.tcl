@@ -10,26 +10,36 @@
 #     > sdcdb break main.c:55
 # [*] list C source code at line 100:
 #     > sdcdb list main.c:100
+# [*] step through the source code
+#     > sdcdb step
 # [*] and more things to come (WIP).
 #
 # All commands that the SDCDB Debugger recognizes directly. You may call them with sdcdb [COMMAND] [ARGS...]:
 #
-# open path_to_CDB_file
-#       - Read CDB file specified by a path parameter
-# add ?-recursive? path_to_source_dir
-#       - Scan directory for C source files
-# break line
+# open ?-recursive? <directories> [<pathToCDBFile>]
+#       - Start debugging session, reading source files and a CDB file specified by parameters.
+#         -recursive enables recursive searching in subdirectories.
+# break <file>:<line>
 #       - creates breakpoint in <file>:<line>
-# list ?line?
+# list ?<line>?
 #       - list source code at <file>:<line>[-<line>]
 # info ?-break?
-#       - Display information on source code under the program counter. The -break
+#       - Display information on source code under the program counter. The -break parameter
 #         parameter stops execution.
-# step ?n?
+# step ?<n>?
 #       - Executes next n lines of C code step by step, proceeding through subroutine calls.
 #         n defaults to 1.
-# quit
-#       - Free all used memory.
+# next ?<n>?
+#       - The 'sdcdb next' is like 'sdcdb step' but will not proceed through subroutine calls.
+#         You may specify how many n times 'sdcdb next' should execute (defaults to 1).
+# whereis <fileName>
+#       - Checks if a C/assembly source file was included in a scan from `sdcdb open` and
+#         returns the path to the file.
+# map <file>:<line>
+#       - Returns memory address of <file>:<line>, accepting same parameters of 'sdcdb break',
+#         but without creating breakpoints.
+# laddr <address>
+#       - Returns the C/assembly source code associated with a memory address.
 #
 # Known limitations:
 # [*] don't create C files with same name in different folders (in projects with multiple
@@ -66,21 +76,17 @@ proc sdcdb_help {args} {
     if {[llength $args] == 1} {
         return {The SDCDB debugger in Tcl connects OpenMSX to the CDB file created by SDCC.
 
-Recognized commands: open, add, break, list, step, next, info, whereis, laddr, map, quit
+Recognized commands: open, break, list, step, next, info, whereis, laddr, map
 
 Type 'help sdcdb <command>' for more information about each command.
 }
     }
     switch -- [lindex $args 1] {
-        "open" { return {Opens CDB file and start debugging session
+        "open" { return {Opens a project directory and start debugging session
 
-Syntax: sdcdb open <pathToCDBFile>
-}}
-        "add" { return {Adds directory to be scanned for source files
+'sdcdb open' will scan directories for source files and also search for a single CDB file in them, or you may specify the path to a CDB file directly (a single file probably named <projectName>.cdb) in addition to the source files.
 
-'dir' is the path to a directory that will be scanned for more source files to be added to the source database. -recursive may be specified to also look for files in subdirectories. You must call 'sdcdb add' with all files you want to include before you call 'sdcdb open' on the CDB file.
-
-Syntax: sdcdb add ?-recursive? <dir>
+Syntax: sdcdb open <directories> [<.cdbFile>]
 }}
         "break" { return {Creates a breakpoint
 
@@ -133,9 +139,6 @@ Syntax: sdcdb map <file>:<line>
         sdcdb map <file>:<functionName>
         sdcdb map <functionName>
 }}
-        "quit" { return {Closes files and frees all memory.
-
-Syntax: sdcdb quit}}
     }
 }
 
@@ -153,7 +156,7 @@ proc sdcdb {args} {
     if {[catch {set result [dispatcher {*}$args]} msg]} {
         variable debug
         if {$debug} {
-            puts stderr $::errorInfo
+            debug_out stderr $::errorInfo
         }
         error $msg
     }
@@ -165,8 +168,6 @@ proc dispatcher {args} {
     set cmd [lindex $args 0]
     switch -- $cmd {
         open    { return [sdcdb_open       {*}$params] }
-        add     { return [sdcdb_add        {*}$params] }
-        quit    { return [sdcdb_quit       {*}$params] }
     }
     # remaining commands need initialization
     variable initialized
@@ -186,18 +187,44 @@ proc dispatcher {args} {
     }
 }
 
-proc sdcdb_open {path} {
+proc sdcdb_open {param args} {
+    set function normal_glob
     variable initialized
     if {$initialized} {
-        sdcdb::quit
+        free
     }
-    set file [glob -type f -directory $path *.cdb]
-    if {[llength $file] ne 1} {
-        error "unique regular CDB file not found"
+    if {$param eq "-recursive"} {
+        set function recursive_glob
+    } else {
+        set args [linsert $args 0 $param]
     }
-    sdcdb_add -recursive $path
-    read_cdb $file
+    set cdb_file {}
+    foreach path $args {
+        if {![file exists $path]} {
+            error "file '$path' not found"
+        }
+        if {[file isdirectory $path]} {
+            set new_files [$function $path *.c]
+            debug_out "adding files: [join $new_files {, }]"
+            add_files_to_database c_files $new_files
+            set new_files [$function $path *[ASM]]
+            debug_out "adding files: [join $new_files {, }]"
+            add_files_to_database a_files $new_files
+            set cdb_files [$function $path *.cdb]
+        } elseif {[file isfile $path] && [file extension $path] eq ".cdb"} {
+            set cdb_file $path
+        }
+    }
+    if {$cdb_file eq {}} {
+        if {[llength $cdb_files] > 1} {
+            error "multiple CDB files found, you may specify one as a parameter to 'scdb open'"
+        } elseif {[llength $cdb_files] == 0} {
+            error "CDB file not found"
+        }
+        set cdb_file $cdb_files
+    }
     set initialized 1
+    read_cdb $cdb_file
     process_data
 }
 
@@ -331,6 +358,10 @@ proc read_cdb {fname} {
         debug_out "Ignored '$line'"
     }
     close $fh
+    variable c_files
+    variable a_files
+    puts "[array size c_files] C files added"
+    puts "[array size a_files] assembly files added"
     puts "[array size c_files_count] C files references added"
     puts "[array size a_files_count] assembly files references added"
     puts "$c_count C source lines found"
@@ -417,25 +448,6 @@ proc add_files_to_database {arrayname files} {
         }
         set ${arrayname}($filename) $path
     }
-}
-
-proc sdcdb_add {param {path {}}} {
-    variable initialized
-    if {$initialized} {
-        error "CDB file already loaded. Type 'sdcdb quit' before you add more directories"
-    }
-    if {$param eq "-recursive"} {
-        set function recursive_glob
-    } else {
-        set path $param
-        set function normal_glob
-    }
-    set new_files [$function $path *.c]
-    debug_out "adding files: [join $new_files {, }]"
-    add_files_to_database c_files $new_files
-    set new_files [$function $path *[ASM]]
-    debug_out "adding files: [join $new_files {, }]"
-    add_files_to_database a_files $new_files
 }
 
 proc sdcdb_list {args} {
@@ -739,33 +751,34 @@ proc sdcdb_whereis {file} {
     return "'$file' not found in database"
 }
 
-proc sdcdb_quit {} {
+proc free {} {
     variable initialized
-    if {$initialized} {
-        variable c_files
-        foreach filename [array names c_files] {
-            set arrayname c_[file rootname $filename]2addr
-            variable $arrayname
-            catch {unset $arrayname}
-            set arrayname [file rootname $filename]_func2addr
-            variable $arrayname
-            catch {unset $arrayname}
-        }
-        variable a_files
-        foreach filename [array names a_files] {
-            set arrayname a_[file rootname $filename]2addr
-            variable $arrayname
-            catch {unset $arrayname}
-        }
-        catch {unset c_files}
-        variable c_files_count
-        catch {unset c_files_count}
-        variable addr2file
-        catch {unset addr2file}
-        variable g_func2addr
-        catch {unset g_func2addr}
-        set initialized 0
+    if {!$initialized} {
+        return
     }
+    variable c_files
+    foreach filename [array names c_files] {
+        set arrayname c_[file rootname $filename]2addr
+        variable $arrayname
+        catch {unset $arrayname}
+        set arrayname [file rootname $filename]_func2addr
+        variable $arrayname
+        catch {unset $arrayname}
+    }
+    variable a_files
+    foreach filename [array names a_files] {
+        set arrayname a_[file rootname $filename]2addr
+        variable $arrayname
+        catch {unset $arrayname}
+    }
+    catch {unset c_files}
+    variable c_files_count
+    catch {unset c_files_count}
+    variable addr2file
+    catch {unset addr2file}
+    variable g_func2addr
+    catch {unset g_func2addr}
+    set initialized 0
 }
 
 proc h {address} {
