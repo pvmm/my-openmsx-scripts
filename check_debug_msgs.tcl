@@ -22,7 +22,8 @@ proc _check_debug_msg {} {
 }
 
 proc check_debug_msgs {} {
-        variable wio [debug watchpoint create -type write_io -address 0x2f -command _check_debug_msg]
+        ;#variable wio [debug watchpoint create -type write_io -address 0x2f -command _check_debug_msg]
+        variable wio [debug set_watchpoint write_io 0x2f {} _check_debug_msg]
 	return {}
 }
 
