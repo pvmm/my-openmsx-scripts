@@ -10,6 +10,7 @@ My collection of openMSX scripts
 * **sdcdb.tcl**: SDCDB connector (WIP)
 * **server.tcl**: create a TCP/IP server inside OpenMSX
 * **check_debug_msgs.tcl**: checks if Tcl debugging is working
+* **psgwatcher.tcl**: watchpoint for PSG register and value
 
 ## very buggy/immature code/WIP
 * **codeanalyzer.tcl**: script that marks memory as CODE or DATA dynamically (as the program runs in OpenMSX). Useful for source code annotation;
