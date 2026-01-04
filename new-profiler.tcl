@@ -77,6 +77,7 @@ proc _vdpcmd_stop {} {
 	variable vdpcmd_id
 	# error that happens when profiler is started between VDP command start and finish
 	if {![dict exists $v_beginnings $vdpcmd_id]} { return }
+	# update v_endings from v_beginnings
 	dict with v_beginnings $vdpcmd_id {
 		dict set v_endings $vdpcmd_id [dict create begin $begin end $now total [expr {$now - $begin}] status $status]
 	}
@@ -103,8 +104,8 @@ proc _tick_stop {} {
 			set fraction [expr {($begin - $frame_begin) / $frame_len}]
 			_debug "$symbol (unfinished) started at [format %00.2f%% $fraction] of frame"
 		} else {
-			set time [expr {$begin - $frame_begin}]
-			_debug "$symbol (unfinished) started at [format %00.2f% $time] seconds"
+			set time [expr {($begin - $frame_begin) * 1000}]
+			_debug "$symbol (unfinished) started at [format %00.2f% $time] miliseconds"
 		}
 	}
 	set f_beginnings {}
@@ -116,7 +117,7 @@ proc _tick_stop {} {
 			set fraction [expr {$total / $frame_len}]
 			_debug "$symbol: [format %00.2f%% $fraction]"
 		} else {
-			_debug "$symbol: [format %.10f $total] seconds"
+			_debug "$symbol: [format %.10f [expr {1000 * $total}]] miliseconds"
 		}
 	}
 	set f_endings {}
