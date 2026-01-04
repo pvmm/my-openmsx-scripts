@@ -1,13 +1,19 @@
+# TODO:
+# (*) fix VDP command checking
 
 variable f_entries {}     ;# function entry points
 variable f_returns {}     ;# function return points
-variable f_beginnings {}  ;# time mark (beginning)
-variable f_endings {}     ;# time mark (ending)
+variable f_beginnings {}  ;# funtion starting time
+variable f_endings {}     ;# function returning time
+variable v_beginnings {}  ;# vdp command starting time
+variable v_endings {}     ;# vdp command ending time
+variable vdpcmd_id 0
 variable probe_bp {}
 variable width 32
 variable height 8
 variable frame_begin 0
-variable percent 1
+variable frame_end 0
+variable flag_percent 1
 
 proc DEBUG {} { return 1 }
 
@@ -30,7 +36,7 @@ proc _enter_function {symbol} {
 	variable f_returns
 	if {![dict exists $f_returns $caller]} {
 		_debug "creating breakpoint to [h $caller]"
-		dict set f_returns $caller [debug breakpoint create -address $caller -command [list _exit_function $symbol]]
+		dict set f_returns $caller [debug breakpoint create -address 0x[h $caller] -command [list _exit_function $symbol]]
   }
 	# register time at the beginning of function
 	variable f_beginnings
@@ -46,32 +52,67 @@ proc _exit_function {symbol} {
 	set start [dict get $f_beginnings $symbol]
 	dict unset f_beginnings $symbol
 
-	variable f_endings
 	set total [expr {[machine_info time] - $start}]
+	variable f_endings
 	dict set f_endings $symbol $total
+}
+
+proc _vdpcmd_start {} {
+	variable vdpcmd_id
+	_debug "start vdpcmd_start #$vdpcmd_id"
+	variable frame_begin
+	variable frame_end
+	variable v_beginnings
+	set now [machine_info time]
+	# get screen status when VDP is busy
+	set status [expr {([debug read {VDP regs} 1] & 0x40) == 0 ? "(disabled)" : ($now > $frame_end ? "(vblank)" : "")}]
+	dict set v_beginnings $vdpcmd_id [dict create begin $now status $status]
+}
+
+proc _vdpcmd_stop {} {
+	#_debug "start vdpcmd_stop"
+	set now [machine_info time]
+	variable v_beginnings
+	variable v_endings
+	variable vdpcmd_id
+	# error that happens when profiler is started between VDP command start and finish
+	if {![dict exists $v_beginnings $vdpcmd_id]} { return }
+	dict with v_beginnings $vdpcmd_id {
+		dict set v_endings $vdpcmd_id [dict create begin $begin end $now total [expr {$now - $begin}] status $status]
+	}
+	dict unset v_beginnings $vdpcmd_id
+	#_debug "end vdpcmd_stop"
+	incr vdpcmd_id
 }
 
 proc _tick_start {} {
 	variable frame_begin [machine_info time]
+	variable frame_end 0
 }
 
-proc _tick_end {} {
+proc _tick_stop {} {
 	variable frame_begin
-	set frame_end [machine_info time]
+	variable frame_end [machine_info time]
+	variable flag_percent
 	set frame_len [expr {$frame_end - $frame_begin}]
 
+	# display functions that haven't finished
 	variable f_beginnings
-	variable f_endings
-	variable percent
-
-	foreach {symbol start} $f_beginnings {
-		if {$percent} {
-			set fraction [expr {($frame_end - $start) / $frame_len}]
-			_debug "$symbol (unfinished): [format %00.2f%% $fraction] "
+	foreach {symbol begin} $f_beginnings {
+		if {$flag_percent} {
+			set fraction [expr {($begin - $frame_begin) / $frame_len}]
+			_debug "$symbol (unfinished) started at [format %00.2f%% $fraction] of frame"
+		} else {
+			set time [expr {$begin - $frame_begin}]
+			_debug "$symbol (unfinished) started at [format %00.2f% $time] seconds"
 		}
 	}
+	set f_beginnings {}
+
+	# display functions that have finished
+	variable f_endings
 	foreach {symbol total} $f_endings {
-		if {$percent} {
+		if {$flag_percent} {
 			set fraction [expr {$total / $frame_len}]
 			_debug "$symbol: [format %00.2f%% $fraction]"
 		} else {
@@ -80,18 +121,25 @@ proc _tick_end {} {
 	}
 	set f_endings {}
 
+	# display vdp commands that have finished
+	variable v_endings
+	foreach {id vdpcmd} $v_endings {
+		dict with vdpcmd {
+			_debug "vdp cmd #$id: [format %00.2f%% [expr {$total / $frame_len}]] $status"
+		}
+	}
+	set v_endings {}
+
 	#if {![osd exists profile.$symbol]} {
 	#	_profiler_osd_update
 	#}
-}
 
-proc _vdpcmd_start {} {
-	variable f_beginnings
-	dict set f_beginnings vdp_cmd [machine_info time]
-}
-
-proc _vdpcmd_end {} {
-	_exit_function vdp_cmd
+	# reset VDP command ID counter
+	variable v_beginnings
+	if {$v_beginnings eq {}} {
+		variable vdpcmd_id 0
+	}
+	_debug "-----"
 }
 
 proc _profiler_start {args} {
@@ -111,7 +159,7 @@ proc _profiler_start {args} {
 			return
 		}
 	}
-	if {!$symbols} {
+	if {[llength $symbols] == 0} {
 		error "symbols not found"
 		return
 	}
@@ -120,17 +168,17 @@ proc _profiler_start {args} {
 	foreach entry $symbols {
 		lassign $entry _ symbol _ addr
 		_debug "registering breapoint at [h $addr] ($symbol)"
-		dict set f_entries $symbol [debug breakpoint create -address $addr -command [list _enter_function $symbol]]
+		dict set f_entries $symbol [debug breakpoint create -address 0x[h $addr] -command [list _enter_function $symbol]]
 	}
 	# create probe breakpoints on VDP commands
 	set probe_bp [debug probe set_bp VDP.commandExecuting {[debug probe read VDP.commandExecuting] == 1} _vdpcmd_start]
-	set probe_bp [debug probe set_bp VDP.commandExecuting {[debug probe read VDP.commandExecuting] == 0} _vdpcmd_end]
+	set probe_bp [debug probe set_bp VDP.commandExecuting {[debug probe read VDP.commandExecuting] == 0} _vdpcmd_stop]
 	# create probe breakpoints on vertical refresh
 	set probe_bp [debug probe set_bp VDP.IRQvertical {[debug probe read VDP.IRQvertical] == 0} _tick_start]
-	set probe_bp [debug probe set_bp VDP.IRQvertical {[debug probe read VDP.IRQvertical] == 1} _tick_end]
+	set probe_bp [debug probe set_bp VDP.IRQvertical {[debug probe read VDP.IRQvertical] == 1} _tick_stop]
 }
 
-proc profiler_end {} {
+proc profiler_stop {} {
 	variable f_entries
 	foreach {key bp} $f_entries {
 		catch { debug breakpoint remove $bp }
