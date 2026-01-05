@@ -1,6 +1,7 @@
 # TODO:
 # (*) fix VDP command checking
 
+variable tick_status 0
 variable f_entries {}     ;# function entry points
 variable f_returns {}     ;# function return points
 variable f_beginnings {}  ;# funtion starting time
@@ -34,10 +35,7 @@ proc _enter_function {symbol} {
 	set caller [peek16 [reg SP]]
 	# create caller's breakpoint
 	variable f_returns
-	if {![dict exists $f_returns $caller]} {
-		_debug "creating breakpoint to [h $caller]"
-		dict set f_returns $caller [debug breakpoint create -address 0x[h $caller] -command [list _exit_function $symbol]]
-  }
+	dict set f_returns $caller [debug breakpoint create -once true -address 0x[h $caller] -command [list _exit_function $symbol]]
 	# register time at the beginning of function
 	variable f_beginnings
 	dict set f_beginnings $symbol [machine_info time]
@@ -49,17 +47,21 @@ proc _exit_function {symbol} {
 	if {![dict exists $f_beginnings $symbol]} {
 		return
 	}
-	set start [dict get $f_beginnings $symbol]
+	set begin [dict get $f_beginnings $symbol]
 	dict unset f_beginnings $symbol
 
-	set total [expr {[machine_info time] - $start}]
+	set total [expr {[machine_info time] - $begin}]
 	variable f_endings
-	dict set f_endings $symbol $total
+	if {[dict exists $f_endings $symbol]} {
+		dict set f_endings $symbol [expr {[dict get $f_endings $symbol] + $total}]
+	} else {
+		dict set f_endings $symbol $total
+	}
 }
 
 proc _vdpcmd_start {} {
 	variable vdpcmd_id
-	_debug "start vdpcmd_start #$vdpcmd_id"
+	#_debug "start vdpcmd_start #$vdpcmd_id"
 	variable frame_begin
 	variable frame_end
 	variable v_beginnings
@@ -86,29 +88,36 @@ proc _vdpcmd_stop {} {
 	incr vdpcmd_id
 }
 
-proc _tick_start {} {
-	variable frame_begin [machine_info time]
-	variable frame_end 0
+proc _tick {} {
+	variable tick_status
+	variable frame_begin
+	variable frame_end
+	if {$tick_status == 0} {
+		set frame_begin [machine_info time]
+		set frame_end 0
+		set tick_status 1
+	} else {
+		set frame_end [machine_info time]
+		_tick_stop
+		set frame_begin $frame_end
+		set frame_end 0
+		set tick_status 0
+	}
 }
 
 proc _tick_stop {} {
 	variable frame_begin
-	variable frame_end [machine_info time]
+	variable frame_end
 	variable flag_percent
 	set frame_len [expr {$frame_end - $frame_begin}]
 
 	# display functions that haven't finished
 	variable f_beginnings
 	foreach {symbol begin} $f_beginnings {
-		if {$flag_percent} {
-			set fraction [expr {($begin - $frame_begin) / $frame_len}]
-			_debug "$symbol (unfinished) started at [format %00.2f%% $fraction] of frame"
-		} else {
-			set time [expr {($begin - $frame_begin) * 1000}]
-			_debug "$symbol (unfinished) started at [format %00.2f% $time] miliseconds"
-		}
+		set time [expr {$begin * 1000}]
+		_debug "$symbol (unfinished) started at [format %.2f $time] miliseconds"
 	}
-	set f_beginnings {}
+	#set f_beginnings {}
 
 	# display functions that have finished
 	variable f_endings
@@ -175,20 +184,19 @@ proc _profiler_start {args} {
 	set probe_bp [debug probe set_bp VDP.commandExecuting {[debug probe read VDP.commandExecuting] == 1} _vdpcmd_start]
 	set probe_bp [debug probe set_bp VDP.commandExecuting {[debug probe read VDP.commandExecuting] == 0} _vdpcmd_stop]
 	# create probe breakpoints on vertical refresh
-	set probe_bp [debug probe set_bp VDP.IRQvertical {[debug probe read VDP.IRQvertical] == 0} _tick_start]
-	set probe_bp [debug probe set_bp VDP.IRQvertical {[debug probe read VDP.IRQvertical] == 1} _tick_stop]
+	set probe_bp [debug probe set_bp VDP.IRQvertical {[debug probe read VDP.IRQvertical] == 0} _tick]
 }
 
 proc profiler_stop {} {
 	variable f_entries
 	foreach {key bp} $f_entries {
-		catch { debug breakpoint remove $bp }
+		catch {debug breakpoint remove $bp}
 	}
 	set f_entries {}
 
 	variable f_returns
 	foreach {key bp} $f_returns {
-		catch { debug breakpoint remove $bp }
+		catch {debug breakpoint remove $bp}
 	}
 	set f_returns {}
 
@@ -200,7 +208,7 @@ proc profiler_stop {} {
 
 	variable probe_bp
 	if {$probe_bp ne {}} {
-		catch { debug probe remove_bp $probe_bp }
+		catch {debug probe remove_bp $probe_bp}
 	}
 }
 
