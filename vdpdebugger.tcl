@@ -87,11 +87,11 @@ proc _remove_wps {} {
 }
 
 proc _start {} {
-	variable DEBUG
-	variable started
-	if {$started eq 1} { return }
+	variable vbp
+	if {$vbp ne {}} { return }
 
 	_remove_wps
+	variable DEBUG
 	variable vpw
 	variable vdp
 	if {$DEBUG eq {}} {
@@ -101,7 +101,6 @@ proc _start {} {
 		set vpw [debug set_watchpoint write_io $vdp {} [namespace code "_catch _receive_byte"]]
 		#set pw [debug probe set_bp VDP.commandExecuting {} {vdpdebugger::_catch receive_cmd}]
 	}
-	variable started 1
 }
 
 set_help_text vdpdebugger::shutdown {Stop script execution and remove all VRAM watchpoints.
@@ -109,14 +108,10 @@ set_help_text vdpdebugger::shutdown {Stop script execution and remove all VRAM w
 Syntax: vdpdebugger::shutdown
 }
 proc shutdown {} {
-	variable started 0
-	variable vbp
-	unset vbp
-	variable mem
-	unset mem
+	variable vbp {}
+	variable mem {}
 	variable counter 0
 	_remove_wps
-	return
 }
   
 set_help_text vdpdebugger::set_vram_watchpoint {Create VRAM watchpoint.
@@ -131,8 +126,7 @@ proc set_vram_watchpoint {addr {cmd "debug break"}} {
 	variable mem
 	variable vbp
 	variable vbp_counter
-	variable started
-	if {$started eq 0} { _start }
+	if {$vbp eq {}} { _start }
 	if {[llength $addr] > 2} {
 		error "addr: <address> or {<begin> <end>} value range expected"
 	}
@@ -144,15 +138,20 @@ proc set_vram_watchpoint {addr {cmd "debug break"}} {
 		if {![string is integer -strict $end]} {
 			error "\"$end\" is not an address"
 		}
-		dict set vbp $vbp_counter "$begin $end $cmd"
+		dict set vbp $vbp_counter "$begin $end \"$cmd\""
 	} else {
-		dict set vbp $vbp_counter "$begin $begin $cmd"
+		dict set vbp $vbp_counter "$begin $begin \"$cmd\""
 	}
 	incr vbp_counter
 	for {set addr $begin} {$addr <= $end} {incr addr} {
 		lappend mem($addr) $vbp_counter
 	}
 	return vw#$vbp_counter
+}
+
+proc array_exists {arname id} {
+	upvar 1 $arname tmp
+	expr {[info exists tmp($id)]}
 }
 
 set_help_text vdpdebugger::remove_vram_watchpoint {Remove VRAM watchpoint.
@@ -164,8 +163,7 @@ Syntax: vdpdebugger::remove_vram_watchpoint vw#<number>
 proc remove_vram_watchpoint {name} {
 	variable vbp
 	variable mem
-	variable started
-	if {$started eq 0} {
+	if {$vbp eq {}} {
 		error "No such watchpoint: $name"
 	}
 	set id [scan $name vw#%i]
@@ -173,6 +171,7 @@ proc remove_vram_watchpoint {name} {
 		lassign [dict get $vbp $id] begin end
 		dict unset vbp $id
 		for {set addr $begin} {$addr <= $end} {incr addr} {
+			if {![array_exists mem $addr]} { continue }
 			set pos [lsearch -exact $mem($addr) $id]
 			if {$pos >= 0} {
 				# remove element from array of addresses
@@ -191,8 +190,8 @@ Syntax: vdpdebugger::list_vram_watchpoints
 proc list_vram_watchpoints {} {
 	variable vbp
 	dict for {id bp} $vbp {
-		lassign $bp $begin $end $cmd
-		puts "vw#id $begin $end $cmd"
+		lassign $bp begin end cmd
+		puts "vw#id $begin:$end $cmd"
 	}
 }
 
