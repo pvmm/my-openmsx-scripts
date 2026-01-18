@@ -1,19 +1,18 @@
-# Copyright © 2024 Pedro de Medeiros (pedro.medeiros at gmail.com)
+# Copyright © 2024-2026 Pedro de Medeiros (pedro.medeiros at gmail.com)
 #
 # TODO:
 # * MSX2/2+ support:
 #   - detect VDP commands that write to VRAM;
-# * detect BIOS function call as an interface instead of always going into BIOS code;
+# * detect BIOS function call as an entry point instead of always going inside BIOS code;
 # * allow user to attach watchpoints to VRAM regions (PGT, PNT, SPT, etc.);
 # * allow user to set "watchpixels" on (x, y) coordinates in VRAM;
 
 namespace eval vdpdebugger {
 
-variable started 0      ;# properly initialised?
+array set mem {}        ;# vram usage array
 variable vpw {}         ;# vdp port watchpoint
 variable pw {}          ;# VDP.command probe watchpoint
 variable vdp 0x98       ;# default vdp port
-variable mem            ;# vram usage array
 variable vbp {}         ;# store vram watchpoint
 variable vbp_counter 0  ;# command array counter
 
@@ -66,7 +65,7 @@ proc _receive_byte {} {
 	variable vbp
 	# found observed region?
 	set addr [vram_pointer]
-	if {[array get mem $addr] ne {}} {
+	if {[array_exists mem $addr]} {
 		foreach index $mem($addr) {
 			lassign [dict get $vbp $index] begin end cmd
 			eval $cmd
@@ -109,11 +108,17 @@ Syntax: vdpdebugger::shutdown
 }
 proc shutdown {} {
 	variable vbp {}
-	variable mem {}
+	variable mem
+	array unset mem
 	variable counter 0
 	_remove_wps
 }
-  
+
+proc array_exists {arname id} {
+	upvar 1 $arname tmp
+	expr {[info exists tmp($id)]}
+}
+
 set_help_text vdpdebugger::set_vram_watchpoint {Create VRAM watchpoint.
 
 Syntax: vdpdebugger::set_vram_watchpoint <address> [<command>]
@@ -123,9 +128,7 @@ If <command> is not specified, "debug break" is used by default.
 The name of the watchpoint formatted as wp#<number> is returned.
 }
 proc set_vram_watchpoint {addr {cmd "debug break"}} {
-	variable mem
 	variable vbp
-	variable vbp_counter
 	if {$vbp eq {}} { _start }
 	if {[llength $addr] > 2} {
 		error "addr: <address> or {<begin> <end>} value range expected"
@@ -134,24 +137,23 @@ proc set_vram_watchpoint {addr {cmd "debug break"}} {
 	if {![string is integer -strict $begin]} {
 		error "\"$begin\" is not an address"
 	}
-	if {$end ne {}} {
-		if {![string is integer -strict $end]} {
-			error "\"$end\" is not an address"
-		}
-		dict set vbp $vbp_counter "$begin $end \"$cmd\""
-	} else {
-		dict set vbp $vbp_counter "$begin $begin \"$cmd\""
+	if {$end eq {}} {
+		set end $begin
+	} elseif {![string is integer -strict $end]} {
+		error "\"$end\" is not an address"
 	}
+	variable vbp_counter
 	incr vbp_counter
+	dict set vbp $vbp_counter "$begin $end \"$cmd\""
+	variable mem
 	for {set addr $begin} {$addr <= $end} {incr addr} {
-		lappend mem($addr) $vbp_counter
+		if {[array_exists mem $addr]} {
+			lappend mem($addr) $vbp_counter
+		} else {
+			set mem($addr) $vbp_counter
+		}
 	}
 	return vw#$vbp_counter
-}
-
-proc array_exists {arname id} {
-	upvar 1 $arname tmp
-	expr {[info exists tmp($id)]}
 }
 
 set_help_text vdpdebugger::remove_vram_watchpoint {Remove VRAM watchpoint.
@@ -183,6 +185,10 @@ proc remove_vram_watchpoint {name} {
 	}
 }
 
+proc h {addr} {
+	format %04x $addr
+}
+
 set_help_text vdpdebugger::list_vram_watchpoints {List all VRAM watchpoints created by this script.
 
 Syntax: vdpdebugger::list_vram_watchpoints
@@ -191,11 +197,11 @@ proc list_vram_watchpoints {} {
 	variable vbp
 	dict for {id bp} $vbp {
 		lassign $bp begin end cmd
-		puts "vw#id $begin:$end $cmd"
+		puts "vw#$id [h $begin]:[h $end] {$cmd}"
 	}
 }
 
 # DEBUG mode
-variable DEBUG 1
+variable DEBUG 0
 
 } ;# namespace vdpdebugger
