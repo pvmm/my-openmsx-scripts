@@ -12,13 +12,13 @@ namespace eval vdpdebugger {
 variable started 0      ;# properly initialised?
 variable vpw {}         ;# vdp port watchpoint
 variable pw {}          ;# VDP.command probe watchpoint
-variable vdp 152        ;# vdp register (default: 0x98)
+variable vdp 0x98       ;# default vdp port
 variable mem            ;# vram usage array
 variable vbp {}         ;# store vram watchpoint
 variable vbp_counter 0  ;# command array counter
 
 set_help_text vdpdebugger {----------------------------------------------------------------
- vdp debugger 0.7 for openMSX by pvm (pedro.medeiros@gmail.com)
+ vdp debugger 1.0 for openMSX by pvm (pedro.medeiros@gmail.com)
 ----------------------------------------------------------------
 
 The vdp debugger script allows users to create watchpoints in VRAM without resorting to conditions since they are slow.
