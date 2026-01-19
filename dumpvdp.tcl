@@ -4,6 +4,7 @@
 # call "start_dumpvdp" to begin.
 namespace eval dumpvdp {
 
+variable vdp    0x98
 variable status "VAL"
 variable value  {}
 variable dirreg {} ;# direct register access
@@ -13,6 +14,11 @@ variable rdstat {} ;# ready to read VDP status register?
 variable wp1
 variable wp2
 variable wp3
+
+proc scan_vdp {} {
+        variable vdp [peek 7]
+        puts "VDP port found at #[format %x ${vdp}]"
+}
 
 proc wt_ind {arg} {
 	variable indreg
@@ -82,9 +88,12 @@ proc start_dumpvdp {} {
 	variable dumpvdp::wp1
 	variable dumpvdp::wp2
 	variable dumpvdp::wp3
-	set dumpvdp::wp1 [debug watchpoint create -type read_io  -address 0x99 -command {dumpvdp::rd_sts}]
-	set dumpvdp::wp2 [debug watchpoint create -type write_io -address 0x99 -command {dumpvdp::wt_dir $::wp_last_value}]
-	set dumpvdp::wp3 [debug watchpoint create -type write_io -address 0x9B -command {dumpvdp::wt_ind $::wp_last_value}]
+
+	scan_vdp
+	variable vdp
+	set dumpvdp::wp1 [debug watchpoint create -type read_io  -address [expr $vdp + 1] -command {dumpvdp::rd_sts}]
+	set dumpvdp::wp2 [debug watchpoint create -type write_io -address [expr $vdp + 1] -command {dumpvdp::wt_dir $::wp_last_value}]
+	set dumpvdp::wp3 [debug watchpoint create -type write_io -address [expr $vdp + 3] -command {dumpvdp::wt_ind $::wp_last_value}]
 	puts "dumpvdp watchpoints started"
 }
 
