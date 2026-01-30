@@ -25,7 +25,7 @@ The vdp debugger script allows users to create watchpoints in VRAM without resor
 Recognized commands:
 	vdpdebugger::scan_vdp                   Detect first VDP register
 	vdpdebugger::set_vram_watchpoint        Set VRAM watchpoint on address or region
-	vdpdebugger::remove_vram_watchpoint     Removfe VRAM watchpoint by name
+	vdpdebugger::remove_vram_watchpoint     Remove VRAM watchpoint by name
 	vdpdebugger::list_vram_watchpoints      List current VRAM watchpoints
 	vdpdebugger::vram_pointer               Return last used VRAM address
 	vdpdebugger::shutdown                   Disable vdp debugger completely
@@ -39,7 +39,7 @@ Syntax: vdpdebugger::scan_vdp
 }
 proc scan_vdp {} {
 	variable vdp [peek 7]
-	puts "VDP port found at #[format %x ${vdp}]"
+	return "VDP port found at #[format %x ${vdp}]"
 }
 
 # catch error and display more useful information like a stack trace
