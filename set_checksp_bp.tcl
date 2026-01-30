@@ -1,3 +1,4 @@
+# check if function returns to right address in SP
 proc set_checksp_bp {args} {
   if {[llength $args] == 1} {
     set type {-addr}
@@ -13,6 +14,6 @@ proc set_checksp_bp {args} {
   if {$type eq "-symbol"} { set addr [expr $::sym($addr)] }
   # before call set ::addr_sp to [reg SP]
   debug breakpoint create -address "0x[format %x [expr $addr]]" -command "set ::addr_sp \[reg SP\]; puts \"::addr_sp = \$::addr_sp\""
-  # after call stops if ::addr_sp not equals [reg SP]
+  # after the call, stops if ::addr_sp not equals [reg SP]
   debug breakpoint create -address "0x[format %x [expr $addr + 3]]" -condition "\$::addr_sp != \[reg SP\]"
 }
