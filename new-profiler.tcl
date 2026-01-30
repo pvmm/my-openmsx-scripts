@@ -1,3 +1,5 @@
+# new-profiler.tcl has been replaced by _profilter.tcl inside the OpenMSX scripts folder.
+# This code is for reuse and historical purposes only.
 # TODO:
 # (*) fix VDP command checking
 
