@@ -1,4 +1,5 @@
-# check if function returns to right address in SP
+# Copyright © 2026 Pedro de Medeiros (pedro.medeiros at gmail.com)
+# Creates breakpoint that checks if function returns to the right address in SP or stops otherwise.
 proc set_checksp_bp {args} {
   if {[llength $args] == 1} {
     set type {-addr}
