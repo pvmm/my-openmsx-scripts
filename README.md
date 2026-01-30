@@ -13,3 +13,6 @@ My collection of openMSX scripts
 
 ## very buggy/immature code/WIP
 * **codeanalyzer.tcl**: script that marks memory as CODE or DATA dynamically (as the program runs in OpenMSX). Useful for source code annotation;
+
+## deprecated/unmaintained code
+* **new-profiler.tcl** is no longer being developed since a more useful version lives in OpenMSX now as _profiler.tcl.
