@@ -1,4 +1,5 @@
 #!/usr/bin/env tclsh
+# Copyright © 2025 Pedro de Medeiros (pedro.medeiros at gmail.com)
 
 # Define the port to listen on
 set port 9756
