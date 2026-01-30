@@ -1,6 +1,6 @@
 # Copyright © 2024 Pedro de Medeiros (pedro.medeiros at gmail.com)
-#
 # Restore address and range in memory (basically treat memory as ROM)
+# I don't remember what this was used for... 😅
 
 proc restore_addr {addr} {
     set oldvalue [peek $addr]
