@@ -57,7 +57,7 @@ set_help_text vdpdebugger::vram_pointer {Return last VRAM address used.
 Syntax: vdpdebugger::vram_pointer
 }
 proc vram_pointer {} {
-	peek16 0 "VRAM pointer"
+	expr {[debug read {VDP regs} 14] << 14 | [peek16 0 {VRAM pointer}]}
 }
 
 proc _receive_byte {} {
