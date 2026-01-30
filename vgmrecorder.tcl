@@ -1,3 +1,6 @@
+# Copyright © 2024 Pedro de Medeiros (pedro.medeiros at gmail.com)
+# This has been integrated into OpenMSX, but it's saved here for historical purposes.
+# record VGM file from OPL3 sound card
 namespace eval vgm {
 variable active false
 
