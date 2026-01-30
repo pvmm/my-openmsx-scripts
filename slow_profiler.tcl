@@ -1,4 +1,6 @@
-
+# This code evolved into new-profiler.tcl and is no longer maintained.
+# Copyright © 2026 Pedro de Medeiros (pedro.medeiros at gmail.com)
+#
 variable scope {}
 variable cur_time 0
 variable next_addr 0
