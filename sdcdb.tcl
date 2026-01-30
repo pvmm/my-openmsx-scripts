@@ -1,6 +1,5 @@
 # SDCDB Debugger in Tcl - Version 0.8
-#
-# Copyright 2025 Pedro de Medeiros all rights reserved
+# Copyright © 2025 Pedro de Medeiros (pedro.medeiros at gmail.com)
 #
 # A debugger written in Tcl that uses `SDCC --debug` parameter to create breakpoints and much more.
 #
