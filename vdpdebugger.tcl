@@ -67,14 +67,12 @@ proc _receive_byte {} {
 	set addr [vram_pointer]
 	if {[array_exists mem $addr]} {
 		foreach index $mem($addr) {
-			lassign [dict get $vbp $index] begin end cmd
-			eval $cmd
+			lassign [dict get $vbp $index] begin end cond cmd
+			if {$cond ne {} && [expr $cond]} {
+				eval $cmd
+			}
 		}
 	}
-}
-
-proc _receive_cmd {} {
-	# TODO: read vdp regs just like reportVdpCommand
 }
 
 proc _remove_wps {} {
@@ -95,10 +93,8 @@ proc _start {} {
 	variable vdp
 	if {$DEBUG eq {}} {
 		set vpw [debug set_watchpoint write_io $vdp {} [namespace code "_receive_byte"]]
-		#set pw [debug probe set_bp VDP.commandExecuting {} vdpdebugger::receive_cmd]
 	} else {
 		set vpw [debug set_watchpoint write_io $vdp {} [namespace code "_catch _receive_byte"]]
-		#set pw [debug probe set_bp VDP.commandExecuting {} {vdpdebugger::_catch receive_cmd}]
 	}
 }
 
@@ -119,15 +115,19 @@ proc array_exists {arname id} {
 	expr {[info exists tmp($id)]}
 }
 
-set_help_text vdpdebugger::set_vram_watchpoint {Create VRAM watchpoint.
+set_help_text vdpdebugger::set_vram_watchpoint {Create a VRAM watchpoint.
 
-Syntax: vdpdebugger::set_vram_watchpoint <address> [<command>]
+Syntax: vdpdebugger::set_vram_watchpoint <address> <condition> [<command>]
 
-<address> may be a single value or a {<begin> <end>} region.
-If <command> is not specified, "debug break" is used by default.
-The name of the watchpoint formatted as wp#<number> is returned.
+<address> may be a single value or a {<begin> <end>} region. The <condition>
+parameter defines a condition that returns true or false and only if true the
+command is executed. If <command> is not specified, "debug break" is used by
+default. The name of the watchpoint formatted as wp#<number> is returned.
+
+The watchpoint variables ::wp_last_value and ::wp_last_address are available
+to the <condition> and <command> parameters.
 }
-proc set_vram_watchpoint {addr {cmd "debug break"}} {
+proc set_vram_watchpoint {addr {cond {}} {cmd "debug break"}} {
 	variable vbp
 	if {$vbp eq {}} { _start }
 	if {[llength $addr] > 2} {
@@ -144,9 +144,9 @@ proc set_vram_watchpoint {addr {cmd "debug break"}} {
 	}
 	variable vbp_counter
 	incr vbp_counter
-	dict set vbp $vbp_counter "$begin $end \"$cmd\""
+	dict set vbp $vbp_counter [list $begin $end $cond $cmd]
 	variable mem
-	for {set addr $begin} {$addr <= $end} {incr addr} {
+	for {set addr [expr {$begin}]} {$addr <= [expr {$end}]} {incr addr} {
 		if {[array_exists mem $addr]} {
 			lappend mem($addr) $vbp_counter
 		} else {
@@ -197,7 +197,7 @@ proc list_vram_watchpoints {} {
 	variable vbp
 	dict for {id bp} $vbp {
 		lassign $bp begin end cmd
-		puts "vw#$id [h $begin]:[h $end] {$cmd}"
+		puts "vw#$id {0x[h $begin] 0x[h $end]} {$cmd}"
 	}
 }
 
