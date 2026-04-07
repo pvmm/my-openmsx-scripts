@@ -13,6 +13,7 @@ My collection of openMSX scripts
 
 ## very buggy/immature/WIP code
 * **codeanalyzer.tcl**: script that marks memory as CODE or DATA dynamically (as the program runs in OpenMSX). Useful for source code annotation;
+* **read-segments.tcl**: 3 methods of reading currently used segments (8kb, NEO-8 and ASCII16X)
 
 ## deprecated/unmaintained code
 * **slow_profiler.tcl** is deprecated code that has since evolved into **new-profiler.tcl**.
