@@ -51,7 +51,7 @@ variable error {} ;# error propagation
 
 variable hkeyi_wp ;# HKEYI watchpoint
 variable hkeyi {} ;# HKEYI routine address
-variable intpc 0  ;# interrupted PC address
+variable int_pc 0 ;# interrupted PC address
 
 # bookkeeping
 variable old_pc {}
@@ -770,19 +770,19 @@ proc _read_mem {} {
 	variable last_mem_read
 	variable comment
 	variable hkeyi
-	variable intpc
+	variable int_pc
 
 	set full_pc [get_curraddr [reg PC]]
-	if {$full_pc eq $hkeyi && $intpc eq 0} {
+	if {$full_pc eq $hkeyi && $int_pc eq 0} {
 		log "interrupt routine detected"
-		set intpc $old_pc
-	} elseif {[reg PC] eq $intpc} {
+		set int_pc $old_pc
+	} elseif {[reg PC] eq $int_pc} {
 		log "resuming from interrupt routine detected"
-		set intpc 0
+		set int_pc 0
 	}
 
-	#set int [expr $intpc == 0 ? 0 : 1]
-	#log "pc: [xn $old_pc] ([xn $last_mem_read]) -> [xn $full_pc], ([xn $::wp_last_address]), intpc$int"
+	#set int [expr $int_pc == 0 ? 0 : 1]
+	#log "pc: [xn $old_pc] ([xn $last_mem_read]) -> [xn $full_pc], ([xn $::wp_last_address]), int_pc$int"
 
 	# process current instruction
 	if {$old_pc eq [reg PC]} {
@@ -790,6 +790,7 @@ proc _read_mem {} {
 		if {$::wp_last_address eq [expr $last_mem_read + 1]} {
 			tag_CODE [get_curraddr $::wp_last_address]
 		} elseif {$::wp_last_address ne [expr [reg PC]]} {
+			# not reading instruction, but data address
 			set full_addr [get_curraddr $::wp_last_address]
 			tag_extra $full_pc $full_addr 5
 			tag_address $full_addr
