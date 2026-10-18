@@ -11,9 +11,18 @@ variable dirreg {} ;# direct register access
 variable autinc 0  ;# auto increment
 variable indreg {} ;# indirect register access
 variable rdstat {} ;# ready to read VDP status register?
+array set mem   {} ;# save what registers were accessed
 variable wp1
 variable wp2
 variable wp3
+
+proc read_mem {reg, _default} {
+	global mem
+	if {[info exists mem($reg)]} {
+		return $mem($reg)
+	}
+	return $_default
+}
 
 proc scan_vdp {} {
         variable vdp [peek 7]
@@ -21,20 +30,25 @@ proc scan_vdp {} {
 }
 
 proc wt_ind {arg} {
+	global mem
 	variable indreg
 	variable autinc
 	if {$indreg ne {}} {
+		set mem($indreg) [incr [read_mem $indreg 0]]
 		puts stderr "wrote byte 0x[format %x $arg] to vdp register $indreg indirectly"
 		if {$autinc} { incr indreg }
 	} else {
+		set mem("???") [incr [read_mem "???" 0]]
 		puts stderr "wrote byte 0x[format %x $arg] to vdp register ??? indirectly"
 	}
 }
 
 proc rd_sts {} {
+	global mem
 	variable status "VAL" ;# reset in case of an out of sync problem
 	variable rdstat
 	if {$rdstat ne {}} {
+		set mem($rdstat) [incr [read_mem $rdstat 0]]
 		puts stderr "reading from vdp status register [expr {($rdstat & 15)}]"
 	} else {
 		puts stderr "reading from unspecified vdp status register"
@@ -43,6 +57,7 @@ proc rd_sts {} {
 }
 
 proc wt_dir {arg} {
+	global mem
 	variable status
 	variable dirreg
 	variable indreg
@@ -71,6 +86,7 @@ proc wt_dir {arg} {
 					set indreg [expr {$value & 0b00111111}]
 					puts stderr "set indirect access mode to register $indreg [expr {$autinc ? "with" : "without"}] autoincrement"
 				} else {
+					set mem($dirreg) [incr [read_mem $dirreg 0]]
 					puts stderr "wrote byte 0x[format %x $value] to vdp register $dirreg directly"
 				}
 				set status "VAL" ;# next status
@@ -85,24 +101,26 @@ namespace import dumpvdp::*;
 
 # entry point
 proc start_dumpvdp {} {
-	variable dumpvdp::wp1
-	variable dumpvdp::wp2
-	variable dumpvdp::wp3
+	variable ::dumpvdp::vdp
+	variable ::dumpvdp::wp1
+	variable ::dumpvdp::wp2
+	variable ::dumpvdp::wp3
 
-	scan_vdp
-	variable vdp
-	set dumpvdp::wp1 [debug watchpoint create -type read_io  -address [expr $vdp + 1] -command {dumpvdp::rd_sts}]
-	set dumpvdp::wp2 [debug watchpoint create -type write_io -address [expr $vdp + 1] -command {dumpvdp::wt_dir $::wp_last_value}]
-	set dumpvdp::wp3 [debug watchpoint create -type write_io -address [expr $vdp + 3] -command {dumpvdp::wt_ind $::wp_last_value}]
+	dumpvdp::scan_vdp
+	set wp1 [debug watchpoint create -type read_io  -address [expr $vdp + 1] -command {dumpvdp::rd_sts}]
+	set wp2 [debug watchpoint create -type write_io -address [expr $vdp + 1] -command {dumpvdp::wt_dir $::wp_last_value}]
+	set wp3 [debug watchpoint create -type write_io -address [expr $vdp + 3] -command {dumpvdp::wt_ind $::wp_last_value}]
 	puts "dumpvdp watchpoints started"
 }
 
 proc stop_dumpvdp {} {
+	global dumpvdp::mem
 	variable dumpvdp::wp1
 	variable dumpvdp::wp2
 	variable dumpvdp::wp3
 	debug watchpoint remove $dumpvdp::wp1
 	debug watchpoint remove $dumpvdp::wp2
 	debug watchpoint remove $dumpvdp::wp3
-	puts "dumpvdp watchpoints stopped"
+	puts "dumpvdp watchpoints stopped. Registered registers:"
+	puts [array get mem]
 }
